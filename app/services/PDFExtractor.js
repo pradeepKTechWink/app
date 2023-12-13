@@ -5,7 +5,19 @@ const pdf = require('pdf-parse');
 const { createWorker } = require('tesseract.js');
 const pdfToPng = require('pdf-to-png-converter').pdfToPng;
 const dotenv = require('dotenv');
+const winston = require('winston');
+const { combine, timestamp, json } = winston.format;
 dotenv.config();
+
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: combine(timestamp(), json()),
+    transports: [
+      new winston.transports.File({
+        filename: process.env.LOG_FILE_PATH,
+      }),
+    ],
+});
 
 class PDFExtractor {
 
@@ -20,6 +32,7 @@ class PDFExtractor {
     getPageList(pdfPath) {
         return new Promise((resolve, reject) => {
             try {
+                logger.info(`Fetching page numbers for scanned PDF document`)
                 const dataBuffer = fs.readFileSync(pdfPath)
                 pdf(dataBuffer)
                 .then((data) => {
@@ -27,9 +40,11 @@ class PDFExtractor {
                     resolve(pageList)
                 })
                 .catch((err) => {
+                    logger.warn(`Failed to fetch page numbers`)
                     reject(err)
                 })
             } catch (error) {
+                logger.warn(`Failed to fetch page numbers`)
                 reject(error)
             }
         })
@@ -46,24 +61,40 @@ class PDFExtractor {
     }
 
     async checkIfImageDirectoryExist(directoryName) {
-        const folderPath = `${process.env.TMP_IMAGE_PATH}/` + directoryName
-        if(!fs.existsSync(path.resolve(folderPath))){
-            await fsp.mkdir(folderPath)
+        logger.info(`Creating temporary image folder for user Id ${directoryName}`)
+        try {
+            const folderPath = `${process.env.TMP_IMAGE_PATH}/` + directoryName
+            if(!fs.existsSync(path.resolve(folderPath))){
+                await fsp.mkdir(folderPath)
+                logger.info(`Temporary image folder created successfully`)
+            }
+            return
+        } catch (error) {
+            logger.warn(`Failed to create temporary image folder`)
+            logger.error(error)
+            return
         }
-        return
     }
 
     async checkIfTextDirectoryExist(directoryName) {
-        const folderPath = `${process.env.TMP_TXT_PATH}/` + directoryName
-        if(!fs.existsSync(path.resolve(folderPath))){
-            // fs.mkdirSync(folderPath);
-            await fsp.mkdir(folderPath)
+        try {
+            logger.info(`Creating temporary text folder for user Id ${directoryName}`)
+            const folderPath = `${process.env.TMP_TXT_PATH}/` + directoryName
+            if(!fs.existsSync(path.resolve(folderPath))){
+                await fsp.mkdir(folderPath)
+                logger.info(`Temporary text folder created successfully`)
+            }
+            return
+        } catch (error) {
+            logger.warn(`Failed to create temporary text folder`)
+            logger.error(error)
+            return
         }
-        return
     }
 
     convertPDFtoPNG(pdfPath, userId) {
         return new Promise(async (resolve, reject) => {
+            logger.info(`Converting PDF to PNG`)
             const buffer = fs.readFileSync(pdfPath)
             const pageList = await this.getPageList(pdfPath)
             const imgFileNameList = []
@@ -77,6 +108,7 @@ class PDFExtractor {
                     imgFileNameList.push(`tmp${index}.png`)
                     index++
                 }
+                logger.info(`PDF converted to PNG successfully`)
                 resolve(imgFileNameList)
             })
             .catch((err) => {
@@ -87,6 +119,7 @@ class PDFExtractor {
     }
 
     async extractTextFromPDF(pdfPath, userId) {
+        logger.info(`Extracting text from PDF with OCR`)
         let extractedText = []
         const imagePath = `${process.env.TMP_IMAGE_PATH}/${userId}`
         const imageList = await this.convertPDFtoPNG(pdfPath, userId)
@@ -97,6 +130,8 @@ class PDFExtractor {
             extractedText.push(response.data.text)
         }
         await worker.terminate();
+        logger.info(`Text extracted successfully from PDF`)
+        logger.info(JSON.stringify(extractedText))
         return extractedText
     }
 
@@ -110,7 +145,6 @@ class PDFExtractor {
             for (const text of extractedTexts) {
                 await this.checkIfTextDirectoryExist(userId)
                 const cleanedData = await this.removeLineBreak(text)
-                console.log(cleanedData)
                 await fsp.appendFile(`${process.env.TMP_TXT_PATH}/${userId}/${fileName}.txt`, cleanedData)
             }
             return path.resolve(`${process.env.TMP_TXT_PATH}/${userId}/${fileName}.txt`)
@@ -129,12 +163,12 @@ class PDFExtractor {
                     await fsp.unlink(path.join(imgFolderPath, file))
                 }
             })
-            // fs.readdir(textFolderPath, async (err, files) => {
-            //     if (err) reject(err);
-            //     for (const file of files) {
-            //         await fsp.unlink(path.join(textFolderPath, file))
-            //     }
-            // })
+            fs.readdir(textFolderPath, async (err, files) => {
+                if (err) reject(err);
+                for (const file of files) {
+                    await fsp.unlink(path.join(textFolderPath, file))
+                }
+            })
         })
     }
 }

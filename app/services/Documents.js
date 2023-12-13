@@ -7,21 +7,41 @@ const { DocxLoader } = require("langchain/document_loaders/fs/docx");
 const { TextLoader } = require("langchain/document_loaders/fs/text");
 const { CSVLoader } = require("langchain/document_loaders/fs/csv");
 const { PineconeStore } = require("langchain/vectorstores/pinecone");
-const { PineconeClient } = require("@pinecone-database/pinecone");
-const { BufferMemory, ChatMessageHistory } = require("langchain/memory");
+const { Pinecone } = require("@pinecone-database/pinecone");
 const { HumanMessage, AIMessage } = require("langchain/schema");
-const { PromptTemplate } = require("langchain/prompts");
 const { ChatOpenAI } = require("langchain/chat_models/openai");
-const { ConversationalRetrievalQAChain } = require("langchain/chains");
+const {
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+  } = require("langchain/prompts");
+const { RunnableSequence } = require("langchain/schema/runnable");
+const { StringOutputParser } = require("langchain/schema/output_parser");
+const { formatDocumentsAsString } = require("langchain/util/document");
 const XLSX = require("xlsx");
 var reader = require('any-text');
+const { convert } = require('html-to-text');
 const officeParser = require('officeparser');
 const Community = require('./Community');
 const Chat = require("./Chat")
 const { embeddings } = require('../init/OpenAIEmbeddings')
 const { initVectoreStore } = require('../init/VectorStore')
+const SuperAdmin = require('./SuperAdmin')
+const CustomQuerying = require('./CustomQuerying')
+const winston = require('winston');
+const { combine, timestamp, json } = winston.format;
 const dotenv = require('dotenv');
 dotenv.config();
+
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: combine(timestamp(), json()),
+    transports: [
+      new winston.transports.File({
+        filename: process.env.LOG_FILE_PATH,
+      }),
+    ],
+});
 
 class Documents {
     constructor(dbConnection) {
@@ -178,6 +198,47 @@ class Documents {
         })
     }
 
+    updateFile(
+        fileName,
+        fileId
+    ) {
+        return new Promise((resolve, reject) => {
+            const dateTime = new Date()
+            this.dbConnection('documents')
+            .update({
+                name: fileName,
+                created: dateTime
+            })
+            .where({ id: fileId })
+            .then((res) => {
+                resolve(res)
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    isFileNameSame(newFileName, fileId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select('name')
+            .where({ id: fileId })
+            .then((res) => {
+                if(res[0].name == newFileName) {
+                    resolve(1)
+                } else {
+                    resolve(0)
+                }
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
     checkIfFileExists(fileId) {
         return new Promise((resolve, reject) => {
             this.dbConnection("documents")
@@ -192,6 +253,26 @@ class Documents {
             })
             .catch((err) => {
                 console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    checkIfFileNameExistUnderParentId(fileName, parentId, communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select('*')
+            .where({ parentId })
+            .andWhere({ name: fileName })
+            .andWhere({ communityId })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve(1)
+                } else {
+                    resolve(0)
+                }
+            })
+            .catch((err) => {
                 reject(err)
             })
         })
@@ -241,6 +322,22 @@ class Documents {
         })
     }
 
+    deleteEmbeddingsByMetadata(fileId, namespace) {
+        return new Promise(async (resolve, reject) => {
+            const client = new Pinecone();
+
+            client.index(process.env.PINECONE_INDEX).namespace(namespace).deleteMany({ fileId: fileId })
+            .then((res) => {
+                console.log(res)
+                resolve(1)
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
     deleteFiles(filesList, communityId) {
         return new Promise((resolve, reject) => {
             const community = new Community(this.dbConnection);
@@ -254,6 +351,7 @@ class Documents {
                         const fileName = file.id + '.' + ext
                         if(fs.existsSync(path.join(folderPath, fileName))) {
                             await fs2.unlink(path.join(folderPath, fileName));
+                            await this.deleteEmbeddingsByMetadata(file.id, alias)
                         }
                     }
                     resolve(1)
@@ -370,6 +468,7 @@ class Documents {
                     const fileName = file.id + '.' + ext
                     if(fs.existsSync(path.join(folderPath, fileName))) {
                         await fs2.unlink(path.join(folderPath, fileName));
+                        await this.deleteEmbeddingsByMetadata(file.id, alias)
                     }
                     await this.deleteFolderDataFromDatabase(fileId)
                     resolve(1)
@@ -490,7 +589,7 @@ class Documents {
 
     // ********************************** AI integration ***************************************************
 
-    async createDocumentFromPDF(file) {
+    async createDocumentFromPDF(file, metaData, fileName) {
         const loader = new PDFLoader(file);
 
         const splitter = new TokenTextSplitter({
@@ -501,10 +600,18 @@ class Documents {
 
         const docs = await loader.loadAndSplit(splitter);
 
+        docs.forEach(element => {
+            element.metadata['fileId'] = metaData
+            let _pageContent = `The content given below belongs to ${fileName} file\n`
+            element.pageContent = _pageContent + element.pageContent
+        });
+
+        logger.info(JSON.stringify(docs))
+
         return docs;
     }
 
-    async createDocumentFromDocx(file) {
+    async createDocumentFromDocx(file, metaData, fileName) {
         const loader = new DocxLoader(file);
           
         const splitter = new TokenTextSplitter({
@@ -515,12 +622,18 @@ class Documents {
 
         const docs = await loader.loadAndSplit(splitter);
 
-        console.log("Docs created")
+        docs.forEach(element => {
+            element.metadata['fileId'] = metaData
+            let _pageContent = `The content given below belongs to ${fileName} file\n`
+            element.pageContent = _pageContent + element.pageContent
+        });
+
+        logger.info(JSON.stringify(docs))
 
         return docs;
     }
 
-    async createDocumentFromText(file) {
+    async createDocumentFromText(file, metaData, fileName) {
         const loader = new TextLoader(file);
           
         const splitter = new TokenTextSplitter({
@@ -531,10 +644,18 @@ class Documents {
 
         const docs = await loader.loadAndSplit(splitter);
 
+        docs.forEach(element => {
+            element.metadata['fileId'] = metaData
+            let _pageContent = `The content given below belongs to ${fileName} file\n`
+            element.pageContent = _pageContent + element.pageContent
+        });
+
+        logger.info(JSON.stringify(docs))
+
         return docs;
     }
 
-    async createDocumentFromCSV(file) {
+    async createDocumentFromCSV(file, metaData, fileName) {
         const loader = new CSVLoader(file);
           
         const splitter = new TokenTextSplitter({
@@ -544,6 +665,14 @@ class Documents {
         });
 
         const docs = await loader.loadAndSplit(splitter);
+
+        docs.forEach(element => {
+            element.metadata['fileId'] = metaData
+            let _pageContent = `The content given below belongs to ${fileName} file\n`
+            element.pageContent = _pageContent + element.pageContent
+        });
+
+        logger.info(JSON.stringify(docs))
 
         return docs;
     }
@@ -572,6 +701,10 @@ class Documents {
         return new Promise((resolve, reject) => {
             reader.getText(filePath)
             .then(async function (data) {
+                const folderPath = `${process.env.TMP_TXT_PATH}/` + userId
+                if(!fs.existsSync(path.resolve(folderPath))){
+                    await fs2.mkdir(folderPath)
+                }
                 await fs2.appendFile(`${process.env.TMP_TXT_PATH}/${userId}/${fileName}.txt`, data)
                 const textFilePath = path.resolve(`${process.env.TMP_TXT_PATH}/${userId}/${fileName}.txt`)
                 resolve(textFilePath)
@@ -590,6 +723,10 @@ class Documents {
                     console.log(err);
                     reject(err)
                 }
+                const folderPath = `${process.env.TMP_TXT_PATH}/` + userId
+                if(!fs.existsSync(path.resolve(folderPath))){
+                    await fs2.mkdir(folderPath)
+                }
                 await fs2.appendFile(`${process.env.TMP_TXT_PATH}/${userId}/${fileName}.txt`, data)
                 const textFilePath = path.resolve(`${process.env.TMP_TXT_PATH}/${userId}/${fileName}.txt`)
                 resolve(textFilePath)
@@ -607,15 +744,41 @@ class Documents {
         })
     }
 
+    saveHtmlStringToFile(communityAlias, fileName, htmlString) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                const htmlFilePath = path.join(path.resolve(process.env.DOCUMENT_PATH), communityAlias)
+                await fs2.writeFile(path.join(htmlFilePath, `${fileName}.html`), htmlString)
+                resolve(1)
+            } catch (error) {
+                reject(error)
+            }
+        })
+    }
+
+    extractTextFromHtmlStringAndCreateTextFile(htmlString, userId, fileName) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                const tmpTextFileBasePath = path.join(path.resolve(process.env.TMP_TXT_PATH), `${userId}`)
+                const options = {
+                    wordwrap: false
+                };
+                const text = convert(htmlString, options);
+                const folderPath = `${process.env.TMP_TXT_PATH}/` + userId
+                if(!fs.existsSync(path.resolve(folderPath))){
+                    await fs2.mkdir(folderPath)
+                }
+                await fs2.writeFile(path.join(tmpTextFileBasePath, `${fileName}.txt`), text)
+                resolve(path.join(tmpTextFileBasePath, `${fileName}.txt`))
+            } catch (error) {
+                reject(error)
+            }
+        })
+    }
+
     createAndStoreEmbeddingsOnIndex(documents, namespace) {
         return new Promise(async (resolve, reject) => {
-            // const client = await init_pinecone_index()
-            const client = new PineconeClient();
-
-            await client.init({
-                apiKey: process.env.PINECONE_API_KEY,
-                environment: process.env.PINECONE_ENVIRONMENT,
-            });
+            const client = new Pinecone();
 
             const pineconeIndex = client.Index(process.env.PINECONE_INDEX);
 
@@ -623,7 +786,10 @@ class Documents {
                 pineconeIndex,
                 namespace
             })
-            .then((res) => resolve(res))
+            .then((res) => {
+                logger.info(JSON.stringify(res))
+                resolve(res)
+            })
             .catch((err) => reject(err))
         })
     }
@@ -688,45 +854,202 @@ class Documents {
         return null
     }
 
+    getFileName(fileId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select('name')
+            .where({ id: fileId })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve(res[0])
+                }
+                resolve(null)
+            })
+            .catch((err) => {
+                console.log(err)
+            })
+        })
+    }
+
+    getFilePath(fileId) {
+        return new Promise((resolve, reject) => {
+            this.checkIfFileExists(fileId)
+            .then((res) => {
+                if(res == 1) {
+                    this.getPredecessorFolders(fileId)
+                    .then((parentFolders) => {
+                        let filePath = ""
+                        parentFolders.map((fileOrFolderData, index) => {
+                            if(index != 0) {
+                                const pathEnd = index != parentFolders.length - 1 ? '/' : ''
+                                filePath += fileOrFolderData.name + pathEnd
+                            }
+                        })
+                        resolve(filePath)
+                    })
+                    .catch((err) => {
+                        console.log(err)
+                        reject(err)
+                    })
+                } else {
+                    resolve(null)
+                }
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    async extractMetadataFromDocuments(sourceData) {
+        try {
+            const fileList = []
+            if(sourceData) {
+                const citationExist = {}
+                for (const document of sourceData) {
+                    if(document.pageContent.length > 25) {
+                        const fileId = document.metadata.fileId
+                        const filePath = await this.getFilePath(fileId)
+                        if(filePath && !citationExist[filePath]) {
+                            fileList.push({ fileName: filePath })
+                            citationExist[filePath] = true
+                        } 
+                    }
+                }
+            }
+            return fileList
+        } catch (error) {
+            console.log(error)
+            return []
+        }
+        
+    }
+
+    getNonResponseIdentifiers() {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("non-response-identifiers")
+            .select('*')
+            .then((res) => {
+                resolve(res)
+            })
+            .catch((err) => {
+                reject(err)
+            })
+        })
+    }
+
+    buildRegExpFilterString() {
+        return new Promise(async (resolve, reject) => {
+            try {
+                let filterString = ""
+                const identifierList = await this.getNonResponseIdentifiers()
+                identifierList.map((data, index) => {
+                    const stringSuffix = index == identifierList.length - 1 ? '' : '|' 
+                    filterString += data.identifier + stringSuffix
+                })
+                resolve(filterString)
+            } catch (error) {
+                reject(error)
+            }
+        })
+    }
+
+    async isOutOfContextAnswer (aiAnswer) {
+        const filterString = await this.buildRegExpFilterString()
+        const regExp = new RegExp(`(?<text>${filterString})`, 'i')
+        const found = aiAnswer.match(regExp)
+        if(found && found.length > 0) return true
+        return false
+    }
+
     queryIndex(communityAlias, parentId, chatId, question) {
         return new Promise(async (resolve, reject) => {
             const chat = new Chat(this.dbConnection)
+            const superAdmin = new SuperAdmin(this.dbConnection)
+            const customQuerying = new CustomQuerying(this.dbConnection)
+
             try {
-                const model = new ChatOpenAI({});
-                const vectorStore = await initVectoreStore(communityAlias)
+                const setting = await superAdmin.getSettings('queryType')
+                const queryType = setting[0]['meta_value']
+                let res = null
+                if(queryType == 'langchain') {
+                    console.log("Langchain Query")
+                    logger.info(`Querying using langchain query solution`)
+                    const model = new ChatOpenAI({
+                        modelName: process.env.CHAT_MODEL
+                    });
+                    const vectorStore = await initVectoreStore(communityAlias)
+                    const retriever = vectorStore.asRetriever(10)
+    
+                    const SYSTEM_TEMPLATE = `Use the following pieces of context to answer the users question.
+                    If you don't know the answer from the given context, just apologise and say that you don't know, don't try to make up an answer from outside the context.
+                    ----------------
+                    {context}`;
+    
+                    const messages = [
+                        SystemMessagePromptTemplate.fromTemplate(SYSTEM_TEMPLATE),
+                        HumanMessagePromptTemplate.fromTemplate("{question}"),
+                    ];
+                    const prompt = ChatPromptTemplate.fromMessages(messages);
+    
+                    const chain = RunnableSequence.from([
+                        {
+                            question: (input) =>
+                                input.question,
+                            chatHistory: (input) =>
+                                input.chatHistory ?? "",
+                            context: async (input) => {
+                                const relevantDocs = await retriever.getRelevantDocuments(input.question);
+                                const serialized = formatDocumentsAsString(relevantDocs);
+                                return serialized;
+                            },
+                            
+                        },
+                        {
+                            sourceDocuments: RunnableSequence.from([
+                                (input) => input.question,
+                                retriever,
+                            ]),
+                            question: (input) => input.question,
+                        },
+                        {
+                            sourceDocuments: (previousStepResult) => previousStepResult.sourceDocuments,
+                            question: (previousStepResult) => previousStepResult.question,
+                            context: (previousStepResult) =>
+                            formatDocumentsAsString(previousStepResult.sourceDocuments),
+                        },
+                        {
+                            result: prompt.pipe(model).pipe(new StringOutputParser()),
+                            sourceDocuments: (previousStepResult) => previousStepResult.sourceDocuments,
+                        }
+                    ]);
+    
+                    res = await chain.invoke({
+                        question,
+                    });
+                } else {
+                    console.log("Custom Query")
+                    logger.info(`Querying using custom query solution`)
+                    res = await customQuerying.queryIndexByCustomQuerying(question, communityAlias, chatId)
+                }
 
-                // let pastMessages = await this.getPastMessages(chatId)
+                const delimitedText = this.addDelimiterForAIResponse(res.result)
+                let fileList = []
+                if(!await this.isOutOfContextAnswer(res.result)) {
+                    fileList = await this.extractMetadataFromDocuments(res.sourceDocuments)
+                }
 
-                const QA_PROMPT = `Given the following conversation and a follow up question, return the conversation history excerpt that includes any relevant context to the question if it exists and rephrase the follow up question to be a standalone question.
-                Chat History:
-                {chat_history}
-                Follow Up Input: {question}
-                Your answer should follow the following format:
-                \`\`\`
-                Use the following pieces of context to answer the users question.
-                If you don't know the answer or if you don't find the answers in vector database, just say that you don't know, don't try to make up an answer from your own knlowdge base.
-                ----------------
-                <Relevant chat history excerpt as context here>
-                Standalone question: <Rephrased question here>
-                \`\`\`
-                Your answer:`
-
-                const chain = ConversationalRetrievalQAChain.fromLLM(
-                    model,
-                    vectorStore.asRetriever(),
-                    {
-                        returnSourceDocuments: true,
-                        // questionGeneratorChainOptions: {
-                        //     template: QA_PROMPT
-                        // }
-                    }
-                );
-
-                const res = await chain.call({ question, chat_history: [] });
-                const delimitedText = this.addDelimiterForAIResponse(res.text)
+                logger.info(JSON.stringify(res))
 
                 if(delimitedText) {
-                    chat.addMessagesToTheChatHistory(chatId, delimitedText, 'bot', parentId)
+                    chat.addMessagesToTheChatHistory(
+                        chatId, 
+                        delimitedText, 
+                        'bot', 
+                        parentId, 
+                        fileList.length > 0 ? JSON.stringify(fileList) : null
+                    )
                     .then((messageId) => {
                         resolve(messageId)
                     })
@@ -735,7 +1058,7 @@ class Documents {
                         reject(err)
                     })
                 } else {
-                    chat.addMessagesToTheChatHistory(chatId, process.env.OPENAI_FAILURE_ANSWER, 'bot', parentId)
+                    chat.addMessagesToTheChatHistory(chatId, process.env.OPENAI_FAILURE_ANSWER, 'bot', parentId, null)
                     .then((messageId) => {
                         resolve(messageId)
                     })
@@ -747,7 +1070,7 @@ class Documents {
                 
             } catch (error) {
                 console.log(error)
-                chat.addMessagesToTheChatHistory(chatId, process.env.OPENAI_FAILURE_ANSWER, 'bot', parentId)
+                chat.addMessagesToTheChatHistory(chatId, process.env.OPENAI_FAILURE_ANSWER, 'bot', parentId, null)
                 .then((messageId) => {
                     resolve(messageId)
                 })

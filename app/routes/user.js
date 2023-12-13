@@ -3,94 +3,88 @@ const router = express.Router()
 const usersController = require('../controllers/user')
 const auth = require('../middleware/authenticate')
 
-router.route('/users')
+router.route('/user/register')
 .post(usersController.createUser)
 
-router.route('/verify-user')
+router.route('/user/verify')
 .post(usersController.verifyUser)
 
-router.route('/resend-verification-link')
+router.route('/user/resend-verification-link')
 .post(auth.verifyToken, usersController.resendVerificationMail)
 
-router.route('/get-otp')
+router.route('/user/login')
 .post(usersController.validateLoginCredentials)
 
-router.route('/login')
+router.route('/user/submit-otp')
 .post(usersController.validateOTPAndAuthenticateUser)
 
-router.route('/forgot_password')
+router.route('/user/forgot_password')
 .post(usersController.sendResetPasswordLink)
 
-router.route('/reset-password')
+router.route('/user/reset-password')
 .post(usersController.changePassword)
 
-router.route('/change-current-password')
+router.route('/profile/change-password')
 .post(auth.verifyToken, usersController.changeCurrentPassword)
 
-router.route('/update-email')
+router.route('/profile/update-email')
 .post(auth.verifyToken, usersController.updateEmail)
 
-router.route('/enable-2fa')
+router.route('/profile/enable-2fa')
 .post(auth.verifyToken, usersController.enableTwoFactorAuth)
 
-router.route('/disable-2fa')
+router.route('/profile/disable-2fa')
 .post(auth.verifyToken, usersController.disableTwoFactorAuth)
 
-router.route('/enable-company-2fa')
+router.route('/profile/enable-company-2fa')
 .post(auth.verifyToken, auth.adminAccess, usersController.enableCompanyTwoFactorAuth)
 
-router.route('/disable-company-2fa')
+router.route('/profile/disable-company-2fa')
 .post(auth.verifyToken, auth.adminAccess, usersController.disableCompanyTwoFactorAuth)
 
-router.route('/send-invitation')
+router.route('/invitation/send')
 .post(auth.verifyToken, auth.adminAccess, usersController.sendInvitation)
 
-router.route('/invitation-list')
+router.route('/invitation/list')
 .post(auth.verifyToken, auth.adminAccess, usersController.getInvitationList)
 
-router.route('/get-invitation')
+router.route('/invitation/get')
 .post(usersController.getInvitationData)
 
-router.route('/delete-invitations')
-.post(auth.verifyToken, auth.adminAccess, usersController.deleteInvitations)
-
-router.route('/delete-invitation')
+router.route('/invitation/delete')
 .post(auth.verifyToken, auth.adminAccess, usersController.deleteInvitation)
 
-router.route('/resend-invitation')
+router.route('/invitation/resend')
 .post(auth.verifyToken, auth.adminAccess, usersController.resendInvitation)
 
-router.route('/create-account-for-invited-user')
+router.route('/user/create-account-for-invited-user')
 .post(usersController.createAccountForInvitedUser)
 
-router.route('/decline-invitation')
+router.route('/invitation/decline')
 .post(usersController.declineInvitation)
 
-router.route('/get-account-stat')
-.post(auth.verifyToken, usersController.getAccountStatictic)
-
-router.route('/get-user-detail-for-admin')
+router.route('/admin/get-user-detail')
 .post(auth.verifyToken, auth.adminAccess, usersController.getUserDetailsForAdmin)
 
-router.route('/verify-account-for-admin')
+router.route('/admin/verify-account')
 .post(auth.verifyToken, auth.adminAccess, usersController.verifyAccountForAdmin)
 
-router.route('/enable-user-2fa-for-admin')
+router.route('/admin/enable-user-2fa')
 .post(auth.verifyToken, auth.adminAccess, usersController.enable2FAFordmin)
 
-router.route('/disable-user-2fa-for-admin')
+router.route('/admin/disable-user-2fa')
 .post(auth.verifyToken, auth.adminAccess, usersController.disable2FAFordmin)
 
-router.route('/change-lock-status-for-admin')
+router.route('/admin/change-lock-status')
 .post(auth.verifyToken, auth.adminAccess, usersController.userLockAndUnlockOptionForAdmin)
 
-router.route('/admin-password-update')
+router.route('/admin/change-password')
 .post(auth.verifyToken, auth.adminAccess, usersController.adminUpdatePasswordOptionForUser)
 
-router.route('/blacklist-user')
+router.route('/admin/blacklist-user')
 .post(auth.verifyToken, auth.adminAccess, usersController.blackListUserAccount)
 
-router.route('/whitelist-user')
+router.route('/admin/whitelist-user')
 .post(auth.verifyToken, auth.adminAccess, usersController.whiteListUserAccount)
 
 module.exports = () => router;

@@ -1,15 +1,17 @@
 const user = require("../routes/user")
+const SuperAdmin = require('./SuperAdmin')
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
 const bcrypt = require('bcrypt');
-
+const dotenv = require('dotenv');
+dotenv.config();
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: combine(timestamp(), json()),
   transports: [
     new winston.transports.File({
-      filename: '../../logs/combined.log',
+      filename: process.env.LOG_FILE_PATH,
     }),
   ],
 });
@@ -57,18 +59,17 @@ class Users {
                         await this._addUserMeta(userId[0], 'attempt_timestamp', '')
                         await this._addUserMeta(userId[0], 'accountLockStatus', 0)
                         await this._addUserMeta(userId[0], 'profilePic', 'default.png')
-                        await this._addUserMeta(userId[0], '2FA', '0')
                         await this._addUserMeta(userId[0], 'accountBlocked', '0')
-                        // this._addUserMeta(userId[0], 'queries_max_limit', '1000')
-                        // this._addUserMeta(userId[0], 'no_of_queries', '100')
-                        // this._addUserMeta(userId[0], 'users_max_limit', '1000')
-                        // this._addUserMeta(userId[0], 'no_of_users', '100')
-                        // this._addUserMeta(userId[0], 'storage_size_max_limit', '5')
-                        // this._addUserMeta(userId[0], 'file_size', '2')
+
+                        const superAdmin = new SuperAdmin(this.dbConnection)
+                        const default2FASetting = await superAdmin.getSettings('default2FA')
+                        console.log('default2FA', default2FASetting[0]['meta_value'])
+                        await this._addUserMeta(userId[0], '2FA', default2FASetting[0]['meta_value'])
     
                         resolve({
                             userId: userId[0],
-                            token
+                            token,
+                            default2FA: default2FASetting[0]['meta_value']
                         })
                     } catch (error) {
                         logger.error(error)
@@ -226,19 +227,18 @@ class Users {
                     await this.addCompanyMeta(_companyId[0], 'billingAddState', billingAddState)
                     await this.addCompanyMeta(_companyId[0], 'billingAddZip', billingAddZip)
                     await this.addCompanyMeta(_companyId[0], 'companyLogo', 'default.png')
-                    await this.addCompanyMeta(_companyId[0], '2FA', '0')
+
+                    const superAdmin = new SuperAdmin(this.dbConnection)
+                    const default2FASetting = await superAdmin.getSettings('default2FA')
+                    console.log('default2FA', default2FASetting[0]['meta_value'])
+                    await this.addCompanyMeta(_companyId[0], '2FA', default2FASetting[0]['meta_value'])
                     await this.addCompanyMeta(_companyId[0], 'isMailAndBillAddressSame', isMailAndBillAddressSame == 'true' ? '1' : '0')
-                    // this._addUserMeta(userId[0], 'queries_max_limit', '1000')
-                    // this._addUserMeta(userId[0], 'no_of_queries', '100')
-                    // this._addUserMeta(userId[0], 'users_max_limit', '1000')
-                    // this._addUserMeta(userId[0], 'no_of_users', '100')
-                    // this._addUserMeta(userId[0], 'storage_size_max_limit', '5')
-                    // this._addUserMeta(userId[0], 'file_size', '2')
 
                     await this.addRoleAndCompanyToUser(userId, _companyId, 1)
     
                     resolve({
-                        companyId: _companyId
+                        companyId: _companyId,
+                        companyDefault2FA: default2FASetting[0]['meta_value']
                     })
                 } catch (error) {
                     logger.error(error)
@@ -706,6 +706,7 @@ class Users {
 
     getUserDetails(email) {
         return new Promise((resolve, reject) => {
+            logger.info('Fetching user details')
             this.dbConnection('users').where({
                 email: email
             }).select('*')
@@ -839,7 +840,7 @@ class Users {
 
                 let data = {
                     accountLockStatus: temp['accountLockStatus'] == 1 ? true : false,
-                    avatarName: temp['profilePic'],
+                    avatarName: `${process.env.USER_IMAGE_URL}/${temp['profilePic']}`,
                     twoFactorAuth: temp['2FA'] == 1 ? true : false,
                     accountBlocked: temp['accountBlocked'] == 1 ? true : false
                 }
@@ -876,7 +877,7 @@ class Users {
                         state: temp['billingAddState'],
                         postCode: temp['billingAddZip']
                     },
-                    companyLogo: temp['companyLogo'],
+                    companyLogo: `${process.env.COMPANY_IMAGE_URL}/${temp['companyLogo']}`,
                     companytwoFactorAuth: temp['2FA'] == 1 ? true : false,
                     isMailAndBillAddressSame: temp['isMailAndBillAddressSame'] == 1 ? true : false
                 }

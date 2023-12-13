@@ -2,7 +2,10 @@ const dotenv = require('dotenv');
 const Chat = require('../services/Chat')
 const Documents = require('../services/Documents')
 const Community = require('../services/Community')
+const winston = require('winston');
+const { combine, timestamp, json } = winston.format;
 dotenv.config();
+
 const knex = require('knex')({
     client: 'mysql',
     connection: {
@@ -14,23 +17,40 @@ const knex = require('knex')({
     }
 });
 
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: combine(timestamp(), json()),
+    transports: [
+      new winston.transports.File({
+        filename: process.env.LOG_FILE_PATH,
+      }),
+    ],
+});
+
 class ChatController {
     static createNewChat(request, response) {
         const chat = new Chat(knex)
 
+        logger.info(`Creating new chat for user Id ${request.decoded.userId}`)
         chat.createNewChat(process.env.DEFAULT_CHAT_NAME, request.decoded.userId, request.body.communityId)
         .then((chatId) => {
+            logger.info(`New chat created for user Id ${request.decoded.userId}`)
+            logger.info(`Fetching updated chat histories for user Id ${request.decoded.userId}`)
             chat.getChatHistoriesForUserByCommunity(request.decoded.userId, request.body.communityId)
             .then((userChatHistories) => {
+                logger.info(`Updated chat histories fetched for user Id ${request.decoded.userId}`)
                 return response.status(201)
                     .send({ success: true, userChatHistories, activeChatId: chatId });
             })
             .catch((err) => {
+                logger.warn(`Failed to fetch updated chat hsitories for user Id ${request.decoded.userId}`)
+                logger.error(err)
                 return response.status(201)
-                    .send({ success: false, message: 'Chat history updated successfully, but failed to fetch updated data, please refresh the page' });
+                    .send({ success: false, message: request.t('chatHistoryUpdateSuccessFetchFailed') });
             })
         })
         .catch((err) => {
+            logger.warn(`Failed to create new chat for user Id ${request.decoded.userId}`)
             return response.status(201)
             .send({ success: false }); 
         })
@@ -41,10 +61,13 @@ class ChatController {
         const documents = new Documents(knex)
         const community = new Community(knex)
 
+        logger.info(`Initiating new query for the question ${request.body.message}`)
+        logger.info(`Adding user message to chat Id ${request.body.chatId} `)
         chat.addMessagesToTheChatHistory(request.body.chatId, request.body.message, 'user', null)
         .then((parentId) => {
             community.getCommunityAlias(request.body.communityId)
             .then((alias) => {
+                logger.info(`User message added, querying the index`)
                 documents.queryIndex(
                     alias,
                     parentId,
@@ -54,10 +77,13 @@ class ChatController {
                 .then((messageId) => {
                     chat.getChatMessageById(messageId)
                     .then((message) => {
+                        logger.info(`Query successful with the following answer ${message}`)
                         return response.status(201)
                             .send({ success: true, message });
                     })
                     .catch((err) => {
+                        logger.warn(`Query successful but failed to retrive AI answer`)
+                        logger.error(err)
                         console.log(err)
                         return response.status(201)
                             .send({ success: false });
@@ -65,18 +91,24 @@ class ChatController {
                 })
                 .catch((err) => {
                     console.log(err)
+                    logger.warn(`Failed to query the index`)
+                    logger.error(err)
                     return response.status(201)
                         .send({ success: false }); 
                 })
             })
             .catch((err) => {
                 console.log(err)
+                logger.warn(`Failed to query the index`)
+                logger.error(err)
                 return response.status(201)
                     .send({ success: false }); 
             })
         })
         .catch((err) => {
             console.log(err)
+            logger.warn(`Failed to add user message to chat Id ${request.body.chatId}`)
+            logger.error(err)
             return response.status(201)
                 .send({ success: false }); 
         })
@@ -84,12 +116,16 @@ class ChatController {
 
     static retrieveChatMessages(request, response) {
         const chat = new Chat(knex)
+        logger.info(`Fetching chat messages for chat Id ${request.body.chatId}`)
         chat.getChatMessages(request.body.chatId)
         .then((chatMessages) => {
+            logger.info(`Chat messages fetched successfully for Id ${request.body.chatId}`)
             return response.status(201)
                 .send({ success: true, chatMessages });
         })
         .catch((err) => {
+            logger.warn(`Failed to fetch chat messages for id ${request.body.chatId}`)
+            logger.error(err)
             return response.status(201)
             .send({ success: false }); 
         })
@@ -97,13 +133,18 @@ class ChatController {
 
     static getChatHistoriesForUserByCommunity(request, response) {
         const chat = new Chat(knex)
+
+        logger.info(`Fetching chat histories for user Id ${request.body.userId}`)
         chat.getChatHistoriesForUserByCommunity(request.body.userId, request.body.communityId)
         .then((userChatHistories) => {
+            logger.info(`Chat histories fetched successfully for user Id ${request.body.userId}`)
             return response.status(201)
                 .send({ success: true, userChatHistories });
         })
         .catch((err) => {
             console.log(err)
+            logger.warn(`Failed fecth chat histories for user Id ${request.body.userId}`)
+            logger.error(err)
             return response.status(201)
                 .send({ success: false });
         })
@@ -111,47 +152,66 @@ class ChatController {
 
     static renameChatHistory(request, response) {
         const chat = new Chat(knex)
+
+        logger.info(`Renaming chat Id ${request.body.chatId}`)
         chat.renameChat(request.body.chatId, request.body.newChatName)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Chat history ${request.body.chatId} renamed`)
+                logger.info(`Fetching updated chat histories.`)
                 chat.getChatHistoriesForUserByCommunity(request.decoded.userId, request.body.communityId)
                 .then((userChatHistories) => {
+                    logger.info(`Updated chat history fetched successfully`)
                     return response.status(201)
-                        .send({ success: true, userChatHistories, message: 'Chat history updated successfully' });
+                        .send({ success: true, userChatHistories, message: request.t('chatHistoryUpdateSuccess') });
                 })
                 .catch((err) => {
+                    logger.warn(`Failed to fetch updated chat histories`)
+                    logger.error(err)
                     return response.status(201)
-                        .send({ success: false, message: 'Chat history updated successfully, but failed to fetch updated data, please refresh the page' });
+                        .send({ success: false, message: request.t('chatHistoryUpdateSuccessFetchFailed') });
                 })
             } else {
+                logger.warn(`Failed to rename chat history`)
                 return response.status(201)
-                    .send({ success: false, message: 'Failed to update the chat history' });
+                    .send({ success: false, message: request.t('chatHistoryUpdateFailed') });
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to rename chat history`)
+            logger.error(err)
             return response.status(201)
-                .send({ success: false, message: 'Failed to update the chat history' });
+                .send({ success: false, message: request.t('chatHistoryUpdateFailed') });
         })
     }
 
     static deleteChatHistory(request, response) {
         const chat = new Chat(knex)
+
+        logger.info(`Deleting chat Id ${request.body.chatId}`)
         chat.deleteChatHistory(request.body.chatId)
         .then((res) => {
+            logger.info(`Deleted chat Id ${request.body.chatId}`)
+            logger.info(`Fetching updated chat histories`)
             chat.getChatHistoriesForUserByCommunity(request.decoded.userId, request.body.communityId)
             .then((userChatHistories) => {
+                logger.info(`Updated chat history fetched successfully`)
                 return response.status(201)
-                    .send({ success: true, userChatHistories, message: 'Chat history deleted successfully' });
+                    .send({ success: true, userChatHistories, message: request.t('chatHistoryDeleteSuccess') });
             })
             .catch((err) => {
+                logger.warn(`Failed to fetch updated chat histories`)
+                logger.error(err)
                 return response.status(201)
-                    .send({ success: false, message: 'Chat history deleted successfully, but failed to fetch updated data, please refresh the page' });
+                    .send({ success: false, message: request.t('chatHistoryDeleteSuccessFetchFailed') });
             })
         })
         .catch((err) => {
+            logger.warn(`Failed to delete the chat Id ${request.body.chatId}`)
+            logger.error(err)
             console.log(err)
             return response.status(201)
-                .send({ success: false, message: 'Failed to delete the chat history' });
+                .send({ success: false, message: request.t('chatHistoryDeleteSuccessFailed') });
         })
     }
 }

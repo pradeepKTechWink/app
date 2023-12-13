@@ -5,18 +5,17 @@ const Documents = require('../services/Documents')
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
 const i18n =  require('../i18n.config');
+dotenv.config();
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: combine(timestamp(), json()),
   transports: [
     new winston.transports.File({
-      filename: '../../logs/combined.log',
+      filename: process.env.LOG_FILE_PATH,
     }),
   ],
 });
-
-dotenv.config();
 
 const knex = require('knex')({
     client: 'mysql',
@@ -34,6 +33,7 @@ class CommunityController {
         const community = new Community(knex)
         const documents = new Documents(knex)
 
+        logger.info(`Creating community for company Id ${request.body.companyId} by user ${request.body.creator}`)
         community.createCommunity(
             request.body.communityName,
             request.body.communityAlias,
@@ -45,12 +45,14 @@ class CommunityController {
             request.body.companyId
         )
         .then((communityId) => {
+            logger.info(`Community created with Id ${communityId}`)
             documents.createCommunityFolder(request.body.communityAlias)
             documents.createFolder("Financial", 'tooltip', true, 4, communityId,)
             documents.createFolder("Meetings", 'tooltip', true, 4, communityId)
             documents.createFolder("Governing & Legal", 'tooltip', true, 4, communityId)
             documents.createFolder("Community", 'tooltip', true, 4, communityId)
 
+            logger.info(`Fetching updated community list for company ${request.body.companyId}`)
             community.getCommunityList(
               request.body.offset,
               request.body.limit,
@@ -63,38 +65,45 @@ class CommunityController {
 
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
+                  logger.info(`Community list fetched for company ${request.body.companyId}`)
                   return response.status(201)
-                  .send({ success: true, message: 'Community created successfully', communityList: newCommunityList, totalPageNum, noOfRecords, activeCommunities  });
+                  .send({ success: true, message: request.t('communityCreateSuccess'), communityList: newCommunityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
               })
               .catch((err) => {
-                console.log(err)
+                logger.warn(`Community created successfully, but failed to fetch the updated list`)
+                logger.error(err)
                 return response.status(201)
-                    .send({ success: false, message: 'Community created successfully, but failed to fetch the updated list, please reload the page'  });
+                    .send({ success: false, message: request.t('communityCreateSuccessFetchFailed')  });
               })
             })
         })
         .catch((err) => {
-          console.log(err)
-            return response.status(201)
-                .send({ success: false, message: 'Failed to create community'  });
+          logger.warn(`Failed to create a community for company ${request.body.companyId}`)
+          logger.error(err)
+          return response.status(201)
+              .send({ success: false, message: request.t('communityCreateFailed') });
         })
     }
 
     static checkIfAliasAlreadyTaken(request, response) {
       const community = new Community(knex)
 
+      logger.info(`Checking if community ID ${request.body.alias} already exists.`)
       community.isAliasAlreadyExists(request.body.alias)
       .then((res) => {
         if(res == 0) {
+          logger.info(`Community ID ${request.body.alias} does not exists`)
           return response.status(201)
                 .send({ success: true, exist: false  });
         } else {
+          logger.info(`Community ID ${request.body.alias} already exists`)
           return response.status(201)
                 .send({ success: true, exist: true  });
         }
       })
       .catch((err) => {
+        logger.warn(`Failed to check community status for ${request.body.alias}`)
         return response.status(201)
                 .send({ success: false });
       })
@@ -103,23 +112,29 @@ class CommunityController {
     static checkIfAliasAlreadyTakenForUpdate(request, response) {
       const community = new Community(knex)
 
+      logger.info(`Checking if community ID ${request.body.alias} already exists.`)
       community.isReservedAliasByCommunity(request.body.alias, request.body.communityId)
       .then((res) => {
         if(res == 1) {
+          logger.info(`Community ID ${request.body.alias} does not exists`)
           return response.status(201)
                     .send({ success: true, exist: false  });
         } else {
           community.isAliasAlreadyExists(request.body.alias)
           .then((res) => {
             if(res == 0) {
+              logger.info(`Community ID ${request.body.alias} does not exists`)
               return response.status(201)
                     .send({ success: true, exist: false  });
             } else {
+              logger.info(`Community ID ${request.body.alias} already exists`)
               return response.status(201)
                     .send({ success: true, exist: true  });
             }
           })
           .catch((err) => {
+            logger.warn(`Failed to check community status for ${request.body.alias}`)
+            logger.error(err)
             return response.status(201)
                     .send({ success: false });
           })
@@ -130,6 +145,7 @@ class CommunityController {
     static getCommunityList(request, response) {
         const community = new Community(knex)
 
+        logger.info(`Fetching community list for company ${request.body.companyId}`)
         if(request.body.searchString && request.body.searchString != '') {
           community.searchCommunity(
             request.body.searchString, 
@@ -144,19 +160,22 @@ class CommunityController {
             )
             .then((recordCounts) => {
               const {totalPageNum, noOfRecords} = recordCounts
+              logger.info(`Community list fetched successfully for company ${request.body.companyId}`)
               return response.status(201)
-                .send({ success: true, message: 'Community list fetched successfully', communityList, totalPageNum, noOfRecords  });
+                .send({ success: true, message: request.t('communityListFetchSuccess'), communityList, totalPageNum, noOfRecords  });
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                .send({ success: false, message: 'Failed to fetch community list'  });
+                .send({ success: false, message: request.t('communityListFetchFailed')  });
             })
           })
           .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
+            logger.error(err)
             return response.status(201)
-                .send({ success: false, message: 'Failed to fetch community list'  });
+                .send({ success: false, message: request.t('communityListFetchFailed')  });
           })
         } else {
           community.getCommunityList(
@@ -168,19 +187,22 @@ class CommunityController {
             community.getTotalNumberOfPageForCommunityList(request.body.limit, request.body.companyId)
             .then((recordCounts) => {
               const {totalPageNum, noOfRecords} = recordCounts
+              logger.info(`Community list fetched successfully for company ${request.body.companyId}`)
               return response.status(201)
-                .send({ success: true, message: 'Community list fetched successfully', communityList, totalPageNum, noOfRecords  });
+                .send({ success: true, message: request.t('communityListFetchSuccess'), communityList, totalPageNum, noOfRecords  });
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                  .send({ success: false, message: 'Failed to fetch community list'  });
+                  .send({ success: false, message: request.t('communityListFetchFailed') });
             })
           })
           .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
+            logger.error(err)
             return response.status(201)
-                .send({ success: false, message: 'Failed to fetch community list'  });
+                .send({ success: false, message: request.t('communityListFetchFailed') });
           })
         }
     }
@@ -188,9 +210,12 @@ class CommunityController {
     static deactivateCommunity(request, response) {
       const community = new Community(knex)
 
+      logger.info(`Deactivating community ID ${request.body.communityId}`)
       community.deactivateCommunity(request.body.communityId)
       .then((res) => {
         if(res == 1) {
+          logger.info(`Deactivated community ID ${request.body.communityId}`)
+          logger.info(`Fetching updated community list for company ${request.body.companyId}`)
           if(request.body.searchString && request.body.searchString != '') {
             community.searchCommunity(
               request.body.searchString, 
@@ -207,20 +232,23 @@ class CommunityController {
                 const {totalPageNum, noOfRecords} = recordCounts
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
+                  logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
                   return response.status(201)
-                  .send({ success: true, message: 'Community delactivated successfully', communityList, totalPageNum, noOfRecords, activeCommunities  });
+                  .send({ success: true, message: request.t('communityDeactivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
               })
               .catch((err) => {
-                console.log(err)
+                logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+                logger.error(err)
                 return response.status(201)
-                  .send({ success: false, message: 'Community delactivated successfully, but failed the fetch the updated list'  });
+                  .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
               })
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                  .send({ success: false, message: 'Community delactivated successfully, but failed the fetch the updated list'  });
+                  .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
             })
           } else {
             community.getCommunityList(
@@ -234,40 +262,48 @@ class CommunityController {
                 const {totalPageNum, noOfRecords} = recordCounts
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
+                  logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
                   return response.status(201)
-                  .send({ success: true, message: 'Community delactivated successfully', communityList, totalPageNum, noOfRecords, activeCommunities  });
+                  .send({ success: true, message: request.t('communityDeactivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
               })
               .catch((err) => {
-                console.log(err)
+                logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+                logger.error(err)
                 return response.status(201)
-                    .send({ success: false, message: 'Community delactivated successfully, but failed the fetch the updated list'  });
+                    .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
               })
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                  .send({ success: false, message: 'Community deactivated successfully, but failed the fetch the updated list'  });
+                  .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
             })
           }
         } else {
+          logger.warn(`Failed to deactivate community ID ${request.body.communityId}`)
           return response.status(201)
-                .send({ success: false, message: 'Failed to deactivate community'  });
+                .send({ success: false, message: request.t('communityDeactivateFailed')  });
         }
       })
       .catch((err) => {
-        console.log(err)
+        logger.warn(`Failed to deactivate community ID ${request.body.communityId}`)
+        logger.error(err)
         return response.status(201)
-                .send({ success: false, message: 'Failed to deactivate community'  });
+                .send({ success: false, message: request.t('communityDeactivateFailed')  });
       })
     }
 
     static activateCommunity(request, response) {
       const community = new Community(knex)
 
+      logger.info(`Activating community ID ${request.body.communityId}`)
       community.activateCommunity(request.body.communityId)
       .then((res) => {
         if(res == 1) {
+          logger.info(`Activated community ID ${request.body.communityId}`)
+          logger.info(`Fetching updated community list for company ${request.body.companyId}`)
           if(request.body.searchString && request.body.searchString != '') {
             community.searchCommunity(
               request.body.searchString, 
@@ -284,20 +320,23 @@ class CommunityController {
                 const {totalPageNum, noOfRecords} = recordCounts
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
+                  logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
                   return response.status(201)
-                  .send({ success: true, message: 'Community activated successfully', communityList, totalPageNum, noOfRecords, activeCommunities  });
+                  .send({ success: true, message: request.t('communityActivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
               })
               .catch((err) => {
-                console.log(err)
+                logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+                logger.error(err)
                 return response.status(201)
-                  .send({ success: false, message: 'Community activated successfully, but failed the fetch the updated list'  });
+                  .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
               })
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                  .send({ success: false, message: 'Community activated successfully, but failed the fetch the updated list'  });
+                  .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
             })
           } else {
             community.getCommunityList(
@@ -311,40 +350,48 @@ class CommunityController {
                 const {totalPageNum, noOfRecords} = recordCounts
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
+                  logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
                   return response.status(201)
-                  .send({ success: true, message: 'Community activated successfully', communityList, totalPageNum, noOfRecords, activeCommunities  });
+                  .send({ success: true, message: request.t('communityActivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
               })
               .catch((err) => {
-                console.log(err)
+                logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+                logger.error(err)
                 return response.status(201)
-                    .send({ success: false, message: 'Community activated successfully, but failed the fetch the updated list'  });
+                    .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
               })
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                  .send({ success: false, message: 'Community activated successfully, but failed the fetch the updated list'  });
+                  .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
             })
           }
         } else {
+          logger.warn(`Failed to activate community ID ${request.body.communityId}`)
           return response.status(201)
-                .send({ success: false, message: 'Failed to activate community'  });
+                .send({ success: false, message: request.t('communityActivateFailed')  });
         }
       })
       .catch((err) => {
-        console.log(err)
+        logger.warn(`Failed to activate community ID ${request.body.communityId}`)
+        logger.error(err)
         return response.status(201)
-                .send({ success: false, message: 'Failed to activate community'  });
+                .send({ success: false, message: request.t('communityActivateFailed')  });
       })
     }
 
     static deleteCommunities(request, response) {
       const community = new Community(knex)
 
+      logger.info(`Deleting communities for company ${request.body.companyId}`)
       community.deleteCommunities(request.body.communityIds)
       .then((res) => {
         if(res == 1) {
+          logger.info(`Communities deleted for company ${request.body.companyId}`)
+          logger.info(`Fetching updated communities for company ${request.body.companyId}`)
           community.getCommunityList(
             request.body.offset,
             request.body.limit,
@@ -354,43 +401,51 @@ class CommunityController {
             community.getTotalNumberOfPageForCommunityList(request.body.limit, request.body.companyId)
             .then((recordCounts) => {
               const {totalPageNum, noOfRecords} = recordCounts
+              logger.info(`Updated communities fetched successfully for company ${request.body.companyId}`)
               return response.status(201)
-                .send({ success: true, message: 'Communities deleted successfully', communityList, totalPageNum, noOfRecords  });
+                .send({ success: true, message: request.t('communitiesDeleteSuccess'), communityList, totalPageNum, noOfRecords  });
             })
             .catch((err) => {
-              console.log(err)
+              logger.warn(`Failed to fetch the updated communities for company ${request.body.companyId}`)
+              logger.error(err)
               return response.status(201)
-                  .send({ success: false, message: 'Failed to delete communities'  });
+                  .send({ success: false, message: request.t('communitiesDeleteFailed')  });
             })
           })
           .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to fetch the updated communities for company ${request.body.companyId}`)
+            logger.error(err)
             return response.status(201)
-                .send({ success: false, message: 'Failed to delete communities'  });
+                .send({ success: false, message: request.t('communitiesDeleteFailed')  });
           })
         } else {
+          logger.warn(`Failed to delete communities for company ${request.body.companyId}`)
           return response.status(201)
-                .send({ success: false, message: 'Failed to delete communities'  });
+                .send({ success: false, message: request.t('communitiesDeleteFailed')  });
         }
       })
       .catch((err) => {
-        console.log(err)
+        logger.warn(`Failed to delete communities for company ${request.body.companyId}`)
+        logger.error(err)
         return response.status(201)
-                .send({ success: false, message: 'Failed to delete communities'  });
+                .send({ success: false, message: request.t('communitiesDeleteFailed')  });
       })
     }
 
     static getActiveCommunityList(request, response) {
       const community = new Community(knex)
 
+      logger.info(`Fetching active communities list for company ${request.body.companyId}`)
       community.getActiveCommunityList(request.body.companyId)
       .then((_list) => {
+        logger.info(`Active communities fetched successfully for ${request.body.companyId}`)
         return response.status(201)
           .send({ success: true, communityList: _list });
       })
       .catch((err) => {
+        logger.warn(`Failed to fetch active communities for ${request.body.companyId}`)
         return response.status(201)
-                .send({ success: false, message: 'Failed to fetch communities'  });
+                .send({ success: false, message: request.t('activeCommunitiesFetchFailed')  });
       })
     }
 
@@ -398,9 +453,12 @@ class CommunityController {
       const community = new Community(knex)
       const documents = new Documents(knex)
 
+      logger.info(`Updating community ID ${request.body.communityId}`)
+      logger.info(`Renaming community directory for community ${request.body.communityId}`)
       documents.renameCommunityDirectory(request.body.communityId, request.body.communityAlias)
       .then((res) => {
         if(res == 1) {
+          logger.info(`Renaming success for community ${request.body.communityId}`)
           community.updateCommunity(
             request.body.communityName,
             request.body.communityAlias,
@@ -412,6 +470,8 @@ class CommunityController {
           )
           .then((res) => {
             if(res == 1) {
+              logger.info(`Data updated successfully for community ${request.body.communityId}`)
+              logger.info(`Fetching updated communities`)
               if(request.body.searchString && request.body.searchString != '') {
                 community.searchCommunity(
                   request.body.searchString, 
@@ -428,20 +488,23 @@ class CommunityController {
                     const {totalPageNum, noOfRecords} = recordCounts
                     community.getActiveCommunityList(request.body.companyId)
                     .then((activeCommunities) => {
+                      logger.info(`Updated communities fetched for company ${request.body.companyId}`)
                       return response.status(201)
-                      .send({ success: true, message: 'Community updated successfully', communityList, totalPageNum, noOfRecords, activeCommunities  });
+                      .send({ success: true, message: request.t('communityUpdateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                     })
                   })
                   .catch((err) => {
-                    console.log(err)
+                    logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
+                    logger.error(err)
                     return response.status(201)
-                      .send({ success: false, message: 'Community updated successfully, but failed the fetch the updated list'  });
+                      .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                   })
                 })
                 .catch((err) => {
-                  console.log(err)
+                  logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
+                  logger.error(err)
                   return response.status(201)
-                      .send({ success: false, message: 'Community updated successfully, but failed the fetch the updated list'  });
+                      .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                 })
               } else {
                 community.getCommunityList(
@@ -455,40 +518,48 @@ class CommunityController {
                     const {totalPageNum, noOfRecords} = recordCounts
                     community.getActiveCommunityList(request.body.companyId)
                     .then((activeCommunities) => {
+                      logger.info(`Updated communities fetched for company ${request.body.companyId}`)
                       return response.status(201)
-                      .send({ success: true, message: 'Community updated successfully', communityList, totalPageNum, noOfRecords, activeCommunities  });
+                      .send({ success: true, message: request.t('communityUpdateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                     })
                   })
                   .catch((err) => {
-                    console.log(err)
+                    logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
+                    logger.error(err)
                     return response.status(201)
-                        .send({ success: false, message: 'Community updated successfully, but failed the fetch the updated list'  });
+                        .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                   })
                 })
                 .catch((err) => {
-                  console.log(err)
+                  logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
+                  logger.error(err)
                   return response.status(201)
-                      .send({ success: false, message: 'Community updated successfully, but failed the fetch the updated list'  });
+                      .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                 })
               }
             } else {
+              logger.warn(`Community update failed for Id ${request.body.communityId}`)
               return response.status(201)
-                  .send({ success: false, message: 'Failed to update community'  });
+                  .send({ success: false, message: request.t('communityUpdateFailed1')  });
             }
           })
           .catch((err) => {
-            console.log(err)
+            logger.warn(`Community update failed for Id ${request.body.communityId}`)
+            logger.error(err)
             return response.status(201)
-                .send({ success: false, message: 'Failed to update community'  });
+                .send({ success: false, message: request.t('communityUpdateFailed1')  });
           })
         } else {
+          logger.warn(`Community update failed for Id ${request.body.communityId}`)
           return response.status(201)
-                  .send({ success: false, message: 'Failed to update community'  });
+                  .send({ success: false, message: request.t('communityUpdateFailed1')  });
         }
       })
       .catch((err) => {
+        logger.warn(`Community update failed for Id ${request.body.communityId}`)
+        logger.error(err)
         return response.status(201)
-                  .send({ success: false, message: 'Failed to update community, cannot rename old directory'  });
+                  .send({ success: false, message: request.t('communityUpdateFailed2')  });
       })
     }
 }

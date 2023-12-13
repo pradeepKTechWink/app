@@ -3,22 +3,22 @@ const router = express.Router()
 const ChatController = require('../controllers/chat')
 const auth = require('../middleware/authenticate')
 
-router.route('/create-new-chat')
+router.route('/chat/create')
     .post(auth.verifyToken, auth.isCompanyUser, ChatController.createNewChat)
 
-router.route('/get-chat-histories')
+router.route('/chat/get-histories')
     .post(auth.verifyToken, auth.isCompanyUser, ChatController.getChatHistoriesForUserByCommunity)
 
-router.route('/rename-chat-history')
+router.route('/chat/rename')
     .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.renameChatHistory)
 
-router.route('/delete-chat-history')
+router.route('/chat/delete')
     .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.deleteChatHistory)
 
-router.route('/get-chat-messages')
+router.route('/chat/get-messages')
     .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.retrieveChatMessages)
 
-router.route('/add-message-to-chat')
+router.route('/chat/add-message')
     .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.addMessageToConversation)
 
 module.exports = () => router;

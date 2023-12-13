@@ -6,24 +6,17 @@ const nodemailer = require('nodemailer');
 const path = require('path')
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
-const LocaleService = require('../services/localeService');
-const i18n =  require('../i18n.config');
-
-const localeService = new LocaleService(i18n);
-
-localeService.setLocale('en');
+dotenv.config();
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: combine(timestamp(), json()),
   transports: [
     new winston.transports.File({
-      filename: '../../logs/combined.log',
+      filename: process.env.LOG_FILE_PATH,
     }),
   ],
 });
-
-dotenv.config();
 
 const knex = require('knex')({
     client: 'mysql',
@@ -60,14 +53,18 @@ transporter.use('compile', hbs(handlebarOptions))
 class UsersController {
     static createUser(request, response) {
         const user = new Users(knex)
-        console.log(request.body)
         
+        logger.info(`Creating new account for ${request.body.email}`)
+        logger.info(`Checking if account already exists for ${request.body.email}`)
         user.checkIfUserExist(request.body.email)
         .then((res) => {
             if(res.length > 0) {
+                logger.warn(`Account already exists for ${request.body.email}`)
                 return response.status(200)
                     .send({ success: false, message: `${request.body.email} already has an account, try with another email` });
             } else {
+                logger.info(`Account does not exist for ${request.body.email}`)
+                logger.info(`Creating user account for ${request.body.email}`)
                 user.createNewUser(
                     request.body.firstname,
                     request.body.lastname,
@@ -76,8 +73,9 @@ class UsersController {
                     request.body.password,
                 ).then((res) => {
 
-                    const { userId, token } = res
-
+                    const { userId, token, default2FA } = res
+                    logger.info(`User account creation successful for ${request.body.email}`)
+                    logger.info(`Creating company account for ${request.body.email}`)
                     user.createNewCompany(
                         userId,
                         request.body.companyName,
@@ -95,7 +93,8 @@ class UsersController {
                     )
                     .then((res) => {
 
-                        const { companyId } = res
+                        const { companyId, companyDefault2FA } = res
+                        logger.info(`Company account creation successful for ${request.body.email}`)
 
                         if(companyId) {
                             const jwtToken = jwt.sign({
@@ -134,10 +133,10 @@ class UsersController {
                                     state: request.body.billingAddStateName,
                                     postCode: request.body.billingAddZip
                                 },
-                                avatarName: 'default.png',
-                                twoFactorAuth: false,
-                                companyLogo: 'default.png',
-                                companytwoFactorAuth: false,
+                                avatarName: `${process.env.USER_IMAGE_URL}/default.png`,
+                                twoFactorAuth: default2FA == '1' ? true : false,
+                                companyLogo: `${process.env.COMPANY_IMAGE_URL}/default.png`,
+                                companytwoFactorAuth: companyDefault2FA == '1' ? true : false,
                                 isMailAndBillAddressSame: request.body.isMailAndBillAddressSame
                             }
         
@@ -154,9 +153,9 @@ class UsersController {
                             transporter.sendMail(mailOptions2, function(error, info){
                                 if(error){
                                     logger.error(error.message)
-                                    return console.log(error);
+                                    return
                                 }
-                                console.log('Message sent: ' + info.response);
+                                logger.info(`Welcome message successfully sent to ${request.body.email}`)
                             });
         
                             var mailOptions = {
@@ -173,25 +172,28 @@ class UsersController {
                             transporter.sendMail(mailOptions, function(error, info){
                                 if(error){
                                     logger.error(error.message)
-                                    return console.log(error);
+                                    return
                                 }
-                                console.log('Message sent: ' + info.response);
+                                logger.info(`Verification email successfully sent to ${request.body.email}`)
                             });
         
                             return response.status(201)
                                 .send({ success: true, message: request.t('accountCreationSuccess'), userData: data  });
                         } else {
+                            logger.warn(`Company account creation failed for ${request.body.email}`)
                             return response.status(201)
                                 .send({ success: false, message: request.t('accountCreationFailed') });
                         }
                     })
                     .catch((err) => {
+                        logger.warn(`Company account creation failed for ${request.body.email}`)
+                        logger.error(err)
                         return response.status(201)
                                 .send({ success: false, message: request.t('accountCreationFailed') });
                     })
                 })
                 .catch((err) => {
-                    console.log(err)
+                    logger.warn(`User account creation failed for ${request.body.email}`)
                     logger.error(err)
                     return response.status(400)
                             .send({success: false, message: err});
@@ -203,38 +205,45 @@ class UsersController {
     static verifyUser(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Validating verification token for user ID ${request.body.userId}`)
         user.validateToken(
             request.body.userId,
             request.body.token
         )
         .then((res) => {
             if(res == 'valid') {
+                logger.info(`Verification token is valid for user ID ${request.body.userId}`)
+                logger.info(`Verifying account for user ID ${request.body.userId}`)
                 user.verifyAccount(request.body.userId)
                 .then((res) => {
                     if(res == 1) {
+                        logger.info(`Account verification success for ${request.body.userId}`)
                         return response.status(200)
                             .send({success: true, message: request.t('accountVerificationSuccess')});
                     } else {
+                        logger.warn(`Account verification failed for ${request.body.userId}`)
                         return response.status(200)
                             .send({success: false, message: request.t('accountVerificationFailed')});
                     }
                 })
                 .catch((err) => {
-                    console.log(err)
+                    logger.warn(`Account verification failed for ${request.body.userId}`)
                     logger.error(err)
                     return response.status(200)
                             .send({success: false, message: request.t('accountVerificationFailed')});
                 })
             } else if(res == 'expired') {
+                logger.warn(`Verification token expired for user ID ${request.body.userId}`)
                 return response.status(200)
                             .send({success: false, message: request.t('verifyLinkExpired')});
             } else {
+                logger.warn(`Verification token invalid for user ID ${request.body.userId}`)
                 return response.status(200)
                             .send({success: false, message: request.t('verifyLinkInvalid')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Token verification failed for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
                             .send({success: false, message: request.t('accountVerificationFailed')});
@@ -244,10 +253,14 @@ class UsersController {
     static resendVerificationMail(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Resending verification link for ${request.body.userId}`)
+        logger.info(`Resetting verification token for ${request.body.userId}`)
         user.resetToken(request.body.userId)
         .then((result) => {
             const { res, token } = result
             if(res == 1) {
+                logger.info(`Token reset success for ${request.body.userId}`)
+                logger.info(`Fetching user information for ${request.body.userId}`)
                 user.getUserDetailsById(request.body.userId)
                 .then((user) => {
                     var mailOptions = {
@@ -263,23 +276,25 @@ class UsersController {
     
                     transporter.sendMail(mailOptions, function(error, info){
                         if(error){
-                            console.log(error);
+                            logger.warn(`Failed to resend verification email for ${request.body.userId}`)
                             logger.error(error.message)
                             return response.status(200)
                             .send({success: false, message: request.t('verifyLinkSendFailed')});
                         }
-                        console.log('Message sent: ' + info.response);
+                        logger.info(`Verification email resent successfully for ${request.body.userId}`)
     
                         return response.status(200)
                             .send({success: true, message: request.t('verifyLinkSendSuccess')});
                     });
                 })
             } else {
+                logger.warn(`Token reset failed for ${request.body.userId}`)
                 return response.status(200)
                         .send({success: false, message: request.t('verifyLinkSendFailed')});
             }
         })
         .catch((err) => {
+            logger.warn(`Token reset failed for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
             .send({success: false, message: request.t('verifyLinkSendFailed')});
@@ -288,19 +303,24 @@ class UsersController {
 
     static validateLoginCredentials(request, response) {
         const user = new Users(knex)
+
+        logger.info(`Validating login credential for ${request.body.email}`)
         user.validateLoginCredential(request.body.email, request.body.password)
         .then((res) => {
             if(res.stat == 'valid') {
-
+                logger.info(`Valid credentials provided by ${request.body.email}`)
                 user.getUserDetails(request.body.email)
                 .then((data) => {
                     let userData = data
-
+                    logger.info(`Checking if account is blocked for ${request.body.email}`)
                     if(!userData.accountBlocked) {
+                        logger.info(`Account not in block status`)
+                        logger.info(`Checking if 2FA is enabled for ${request.body.email}`)
                         user.is2FAEnabled(userData.id)
                         .then((res) => {
                             if(res == 'disabled') {
-
+                                logger.info(`2FA is disabled for ${request.body.email}`)
+                                logger.info(`Initiating authentication for ${request.body.email}`)
                                 user.getCompanyRole(userData.id)
                                 .then((roleData) => {
                                     user.getCompanyDetails(roleData.company)
@@ -320,18 +340,21 @@ class UsersController {
                                         }
 
                                         userData = {...userData, ...companyData, ..._auth, role: roleData.role}
-
+                                        logger.info(`Authentication success for ${request.body.email}`)
                                         return response.status(200)
                                         .send({ success: true, message: request.t('Authentication Success'), userData, twoFactorAuth: false });
                                     })
                                 })
                                 .catch((err) => {
-                                    console.log(err)
+                                    logger.warn(`Authentication failed for ${request.body.email}`)
+                                    logger.error(err)
                                     return response.status(200)
                                             .send({success: false, message: request.t('loginFailed')});
                                 })
                                 
                             } else {
+                                logger.info(`2FA is enabled for ${request.body.email}`)
+                                logger.info(`Sending OTP to ${request.body.email}`)
                                 let userId = userData.id
 
                                 user.generateOTP(userId)
@@ -348,16 +371,18 @@ class UsersController {
                     
                                     transporter.sendMail(mailOptions, function(error, info){
                                         if(error){
+                                            logger.warn(`Failed to send OTP for ${request.body.email}`)
                                             logger.error(error.message)
                                             return console.log(error);
                                         }
-                                        console.log('Message sent: ' + info.response);
+                                        logger.info(`OTP sent successfully for ${request.body.email}`)
                                     });
                     
                                     return response.status(200)
                                         .send({success: true, message: 'Valid credential', twoFactorAuth: true});
                                 })
                                 .catch((err) => {
+                                    logger.warn(`Failed to send OTP for ${request.body.email}`)
                                     logger.error(err)
                                     return response.status(200)
                                         .send({success: false, message: request.t('invalidCredential')});
@@ -365,20 +390,24 @@ class UsersController {
                             }
                         })
                     } else {
+                        logger.warn(`Authentication failed, account marked for deletion for ${request.body.email}`)
                         return response.status(200)
                         .send({success: false, message: request.t('accountDeleted')});
                     }
                 })
                 
             } else if(res.stat == 'locked') {
+                logger.warn(`Authentication failed, account locked for ${request.body.email}`)
                 return response.status(200)
                     .send({success: false, message: request.t('accountLocked')});
             } else {
+                logger.warn(`Authentication failed, invalid credential provided by ${request.body.email}`)
                 return response.status(200)
                     .send({success: false, message: request.t('invalidCredential')});
             }
         })
         .catch((err) => {
+            logger.warn(`Authentication failed for ${request.body.email}`)
             logger.error(err)
             return response.status(200)
                     .send({success: false, message: request.t('loginFailed')});
@@ -387,7 +416,7 @@ class UsersController {
 
     static validateOTPAndAuthenticateUser(request, response) {
         const user = new Users(knex)
-
+        logger.info(`Validating OTP sent by ${request.body.email}`)
         user.validateCredentialAndOtp(
             request.body.email,
             request.body.password,
@@ -395,11 +424,14 @@ class UsersController {
         )
         .then((res) => {
             if(res == 'valid') {
+                logger.info(`Valid credentials provided by ${request.body.email}`)
                 user.getUserDetails(request.body.email)
                 .then((data) => {
                     let userData = data
-
+                    logger.info(`Checking if account is blocked for ${request.body.email}`)
                     if(!userData.accountBlocked) {
+                        logger.info(`Account not in block status`)
+                        logger.info(`Initiating authentication for ${request.body.email}`)
                         user.getCompanyRole(userData.id)
                         .then((roleData) => {
                             user.getCompanyDetails(roleData.company)
@@ -419,25 +451,29 @@ class UsersController {
                                 }
 
                                 userData = {...userData, ...companyData, ..._auth, role: roleData.role}
-
+                                logger.info(`Authentication success for ${request.body.email}`)
                                 return response.status(200)
-                                .send({ success: true, message: 'Authentication Success', userData, twoFactorAuth: false });
+                                .send({ success: true, message: 'Authentication Success', userData, twoFactorAuth: true });
                             })
                         })
                         .catch((err) => {
-                            console.log(err)
+                            logger.warn(`Authentication failed for ${request.body.email}`)
+                            logger.error(err)
                             return response.status(200)
                                     .send({success: false, message: request.t('loginFailed')});
                         })
                     } else {
+                        logger.warn(`Authentication failed, account marked for deletion for ${request.body.email}`)
                         return response.status(200)
                             .send({success: false, message: request.t('accountDeleted')});
                     }
                 })
             } else if( res == 'expired') {
+                logger.warn(`OTP expired for ${request.body.email}`)
                 return response.status(201)
                         .send({ success: false, message: request.t('OTPExpired') });
             } else if(res == 'Invalid OTP') {
+                logger.warn(`Invalid OTP provided by ${request.body.email}`)
                 user.getUserDetails(request.body.email)
                 .then((data) => {
                     let userData = data
@@ -463,9 +499,11 @@ class UsersController {
                         .send({ success: false, message: request.t('invalidOTP') });
                 })
             } else if(res == 'locked') {
+                logger.warn(`Account locked due to multiple incorrect OTP attempt for ${request.body.email}`)
                 return response.status(201)
                         .send({ success: false, message: request.t('accountLocked') });
             } else {
+                logger.warn(`Authentication failed, invalid credential provided by ${request.body.email}`)
                 return response.status(201)
                         .send({ success: false, message: request.t('invalidCredential') });
             }
@@ -475,9 +513,12 @@ class UsersController {
     static sendResetPasswordLink(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Sending password reset link for ${request.body.email}`)
+        logger.info(`Checking if account exists for ${request.body.email}`)
         user.checkIfUserExist(request.body.email)
         .then((res) => {
             if(res.length > 0) {
+                logger.warn(`Account exists for ${request.body.email}`)
                 user.getUserDetails(request.body.email)
                 .then((data) => {
                     const userData = data
@@ -493,41 +534,44 @@ class UsersController {
                                 template: 'password_reset',
                                 context:{
                                     name: userData.firstname,
-                                    link: `${process.env.FRONTEND_BASE_URL}/auth/reset-password?id=${userData.id}&token=${token}`
+                                    link: `${process.env.FRONTEND_BASE_URL}/auth/reset-password?email=${request.body.email}&token=${token}`,
+                                    token
                                 }
                             };
             
                             transporter.sendMail(mailOptions, function(error, info){
                                 if(error){
-                                    console.log(error);
+                                    logger.warn(`Failed send password reset email for ${request.body.email}`);
                                     logger.error(error.message)
                                     return response.status(200)
                                     .send({success: false, message: request.t('resetPassLinkSendFailed')});
                                 }
-                                console.log('Message sent: ' + info.response);
+                                logger.info(`Password reset email sent successfully for ${request.body.email}`)
             
                                 return response.status(200)
                                     .send({success: true, message: request.t('resetPassLinkSendSuccess')});
                             });
                         } else {
+                            logger.warn(`Failed to send password reset email for ${request.body.email}`)
                             return response.status(200)
                                 .send({success: false, message: request.t('resetPassLinkSendFailed')});
                         }
                     })
                     .catch((err) => {
-                        console.log(err)
+                        logger.warn(`Failed to send password reset email for ${request.body.email}`)
                         logger.error(err)
                         return response.status(200)
                         .send({success: false, message: request.t('resetPassLinkSendFailed')});
                     })
                 })
             } else {
+                logger.warn(`Cannot find account registered under ${request.body.email}`)
                 return response.status(200)
                     .send({success: false, message: `${request.body.email} ${request.t('emailNotExist')}`});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to send password reset email for ${request.body.email}`)
             logger.error(err)
             return response.status(200)
                 .send({success: false, message: request.t('resetPassLinkSendFailed')});
@@ -537,61 +581,87 @@ class UsersController {
     static changePassword(request, response) {
         const user = new Users(knex)
 
-        user.validateToken(
-            request.body.userId,
-            request.body.token
-        ).then((res) => {
-            if(res == 'valid') {
-                user.updatePassword(request.body.userId, request.body.password)
-                .then((res) => {
-                    if(res == 1) {
-                        return response.status(200)
-                            .send({success: true, message: request.t('passChangeSuccess')});
-                    } else {
-                        return response.status(200)
-                            .send({success: false, message: request.t('passChangeFailed')});
-                    }
-                })
-            } else if(res == 'invalid token') {
+        logger.info(`Initiating password change for ${request.body.email}`)
+        logger.info(`Validating password reset token for ${request.body.email}`)
+
+        user.getUserDetails(request.body.email)
+        .then((userData) => {
+            const userId = userData.id
+
+            user.validateToken(
+                userId,
+                request.body.token
+            ).then((res) => {
+                if(res == 'valid') {
+                    logger.info(`Valid token provided by ${request.body.email}`)
+                    user.updatePassword(userId, request.body.password)
+                    .then((res) => {
+                        if(res == 1) {
+                            logger.info(`Password update successful for ${request.body.email}`)
+                            return response.status(200)
+                                .send({success: true, message: request.t('passChangeSuccess')});
+                        } else {
+                            logger.warn(`Password update failed for ${request.body.email}`)
+                            return response.status(200)
+                                .send({success: false, message: request.t('passChangeFailed')});
+                        }
+                    })
+                } else if(res == 'invalid token') {
+                    logger.warn(`Invalid token provided by ${request.body.email}`)
+                    return response.status(200)
+                        .send({success: false, message: request.t('resetPassLinkInvalid')});
+                } else if(res == 'expired') {
+                    logger.warn(`Expired token provided by ${request.body.email}`)
+                    return response.status(200)
+                                .send({success: false, message: request.t('resetPassLinkExpired')});
+                }
+            })
+            .catch((err) => {
+                logger.warn(`Password change failed for ${request.body.email}`)
+                logger.error(err)
                 return response.status(200)
-                    .send({success: false, message: request.t('resetPassLinkInvalid')});
-            } else if(res == 'expired') {
-                return response.status(200)
-                            .send({success: false, message: request.t('resetPassLinkExpired')});
-            }
+                                .send({success: false, message: request.t('passChangeFailed')});
+            })
         })
         .catch((err) => {
+            logger.warn(`Password change failed for ${request.body.email}`)
             logger.error(err)
+            console.log(err)
             return response.status(200)
-                            .send({success: false, message: request.t('passChangeFailed')});
+                                .send({success: false, message: request.t('passChangeFailed')});
         })
     }
 
     static changeCurrentPassword(request, response) {
         const user = new Users(knex)
 
-        console.log(request.decoded)
+        logger.info(`Initiating password change for user ID ${request.body.userId}`)
+        logger.info(`Validating current password for user ID ${request.body.userId}`)
         user.validatePasswordByUserId(request.body.userId, request.body.currentPassword)
         .then((res) => {
             if(res == 'valid') {
+                logger.info(`Valid password provided by user ID ${request.body.userId}`)
                 user.updatePassword(request.body.userId, request.body.newPassword)
                 .then((res) => {
                     if(res == 1) {
+                        logger.info(`Password update successful for user ID ${request.body.userId}`)
                         return response.status(200)
                             .send({success: true, message: request.t('passwordUpdateSuccess')});
                     } else {
+                        logger.warn(`Password update failed for user ID ${request.body.userId}`)
                         return response.status(200)
                             .send({success: false, message: request.t('passwordUpdateFailed') });
                     }
                 })
             } else {
+                logger.warn(`Invalid password provided by user ID ${request.body.userId}`)
                 return response.status(200)
                             .send({success: false, message: request.t('invalidPassword')});
             }
         })
         .catch((err) => {
+            logger.warn(`Password update failed for user ID ${request.body.userId}`)
             logger.error(err)
-            console.log(err)
             return response.status(200)
                             .send({success: false, message: request.t('passwordUpdateFailed') });
         })
@@ -600,6 +670,7 @@ class UsersController {
     static updateEmail(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Updating email for user ID ${request.body.userId}`)
         user.isUpdatingSameEmail(request.body.userId, request.body.newEmail)
         .then((isSameEmail) => {
             if(isSameEmail == 'no') {
@@ -609,6 +680,7 @@ class UsersController {
                         user.updateEmail(request.body.userId, request.body.newEmail)
                         .then((res) => {
                             if(res == 1) {
+                                logger.info(`Email update success for user ID ${request.body.userId}`)
                                 user.resetToken(request.body.userId)
                                 .then(async (result) => {
                                     const { res, token } = result
@@ -629,12 +701,12 @@ class UsersController {
                             
                                             transporter.sendMail(mailOptions, function(error, info){
                                                 if(error){
-                                                    console.log(error);
+                                                    logger.warn(`Failed to send email verification to ${request.body.newEmail}`);
                                                     logger.error(error.message)
                                                     return response.status(200)
                                                     .send({success: false, message: request.t('verifyLinkSendFailed')});
                                                 }
-                                                console.log('Message sent: ' + info.response);
+                                                logger.info(`Email verification sent to ${request.body.newEmail}`)
                             
                                                 return response.status(200)
                                                     .send({
@@ -646,36 +718,39 @@ class UsersController {
                                             });
                                         })
                                     } else {
+                                        logger.warn(`Email update failed for ${request.body.newEmail}`)
                                         return response.status(200)
                                                 .send({success: false, message: request.t('emailUpdateFailed')});
                                     }
                                 })
                                 .catch((err) => {
+                                    logger.warn(`Email update failed for ${request.body.newEmail}`)
                                     logger.error(err)
-                                    console.log(err)
                                     return response.status(200)
                                     .send({success: false, message: request.t('emailUpdateFailed')});
                                 })
                             }
                         })
                     } else {
+                        logger.warn(`Email update failed due to invalid password provided by ${request.body.newEmail}`)
                         return response.status(200)
                                     .send({success: false, message: request.t('invalidPassword')});
                     }
                 })
                 .catch((err) => {
-                    console.log(err)
+                    logger.warn(`Email update failed for ${request.body.newEmail}`)
                     logger.error(err)
                     return response.status(200)
                                     .send({success: false, message: request.t('emailUpdateFailed')});
                 })
             } else {
+                logger.warn(`Email update failed, current email and new email are same`)
                 return response.status(200)
                     .send({success: false, message: request.t('sameEmail')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Email update failed for ${request.body.newEmail}`)
             logger.error(err)
             return response.status(200)
                 .send({success: false, message: request.t('emailUpdateFailed')});
@@ -685,18 +760,21 @@ class UsersController {
     static enableTwoFactorAuth(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Enabling 2FA for ${request.body.userId}`)
         user.enable2FA(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`2FA enabled for ${request.body.userId}`)
                 return response.status(200)
                         .send({success: true, message: request.t('2FAEnableSuccess')});
             } else {
+                logger.warn(`Failed to enable 2FA for ${request.body.userId}`)
                 return response.status(200)
                         .send({success: false, message: request.t('2FAEnableFailed') });
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to enable 2FA for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
                         .send({success: false, message: request.t('2FAEnableFailed') });
@@ -706,110 +784,134 @@ class UsersController {
     static disableTwoFactorAuth(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Disabling 2FA for ${request.body.userId}`)
         user.disable2FA(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`2FA disabled for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: true, message: 'Two factor authentication disabled'});
+                        .send({success: true, message: request.t('2FADisableSuccess')});
             } else {
+                logger.warn(`Failed to disable 2FA for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to disable two factor authentication'});
+                        .send({success: false, message: request.t('2FADisableFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to disable 2FA for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to disable two factor authentication'});
+                        .send({success: false, message: request.t('2FADisableFailed')});
         })
     }
 
     static enableCompanyTwoFactorAuth(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Enabling company 2FA for ${request.body.companyId}`)
+        logger.warn(`Failed to enable company 2FA for ${request.body.companyId}`)
         user.enableCompany2FA(request.body.companyId, request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Company 2FA enabled for ${request.body.companyId}`)
+                logger.info(`Enabling 2FA for company users`)
                 user.enable2FAForAllCompanyUsers(request.body.companyId)
                 .then((res) => {
                     if(res == 1) {
+                        logger.info(`2FA enabled for all company users`)
                         return response.status(200)
-                            .send({success: true, message: 'Two factor authentication enabled for company and for all of its users'});
+                            .send({success: true, message: request.t('company2FAEnableSuccess')});
                     } else {
+                        logger.warn(`Failed to enable 2FA for company users`)
                         return response.status(200)
-                        .send({success: false, message: 'Two factor authentication enabled for company but failed to enable for its users'});
+                        .send({success: false, message: request.t('company2FAEnableSuccessUsers2FAFailed')});
                     }
                 })
             } else {
+                logger.warn(`Failed to enable 2FA for company Id ${request.body.companyId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to enable two factor authentication for company'});
+                        .send({success: false, message: request.t('company2FAEnableFailed')});
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to enable 2FA for company Id ${request.body.companyId}`)
             logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to enable two factor authentication for company'});
+                        .send({success: false, message: request.t('company2FAEnableFailed')});
         })
     }
 
     static disableCompanyTwoFactorAuth(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Disabling company 2FA for ${request.body.companyId}`)
+        logger.warn(`Failed to disable company 2FA for ${request.body.companyId}`)
         user.disableCompany2FA(request.body.companyId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Company 2FA disabled for ${request.body.companyId}`)
+                logger.info(`Disabling 2FA for company users`)
                 user.disable2FAForAllCompanyUsers(request.body.companyId)
                 .then((res) => {
                     if(res == 1) {
+                        logger.info(`2FA disabled for all company users`)
                         return response.status(200)
-                            .send({success: true, message: 'Two factor authentication disabled for company and for all of its users'});
+                            .send({success: true, message: request.t('company2FADisableSuccess')});
                     } else {
+                        logger.warn(`Failed to disable 2FA for company users`)
                         return response.status(200)
-                        .send({success: false, message: 'Two factor authentication disabled for company but failed to disable for its users'});
+                        .send({success: false, message: request.t('company2FADisableSuccessUsers2FAFailed')});
                     }
                 })
             } else {
+                logger.warn(`Failed to disable 2FA for company Id ${request.body.companyId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to disable two factor authentication for company'});
+                        .send({success: false, message: request.t('company2FADisableFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to disable 2FA for company Id ${request.body.companyId}`)
             logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to disable two factor authentication for company'});
+                        .send({success: false, message: request.t('company2FADisableFailed')});
         })
     }
 
     static getAccountStatictic(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Fetching account statistics for user ID ${request.body.userId}`)
         user.getAccountStatistic(request.body.userId)
         .then((statData) => {
             if(statData) {
+                logger.info(`Account stat fetched successfully for user ID ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: true, message: 'Account stat fetched successfully', statData});
+                        .send({success: true, message: request.t('accountStatFetchSuccess'), statData});
             } else {
+                logger.warn(`Failed to fetch account stat for user ID ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to fetch account stat data'});
+                        .send({success: false, message: request.t('accountStatFetchFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to fetch account stat for user ID ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to fetch account stat data'});
+                        .send({success: false, message: request.t('accountStatFetchFailed')});
         })
     }
 
     static sendInvitation(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Sending invitation to ${request.body.email}`)
+        logger.info(`Checking if account registered under ${request.body.email}`)
         user.checkIfUserExist(request.body.email)
         .then((res) => {
             if(res.length > 0) {
+                logger.info(`Account exist under ${request.body.email}`)
                 return response
-                .send({success: false, message: 'Cannot send invitation, account already exist for the email'});
+                .send({success: false, message: request.t('invtiationAlreadyExist')});
             } else {
                 user.isInvitationSent(request.body.email)
                 .then((inviteSent) => {
@@ -846,58 +948,62 @@ class UsersController {
                         
                                         transporter.sendMail(mailOptions2, function(error, info){
                                             if(error){
+                                                logger.warn(`Failed to send invitation to ${request.body.email}`)
                                                 logger.error(error.message)
                                                 return console.log(error);
                                             }
-                                            console.log('Message sent: ' + info.response);
+                                            logger.info(`Invitation sent to ${request.body.email}`)
                                         });
                 
                                         return response.status(200)
-                                                .send({success: true, message: 'Invitation sent successfully'});
+                                                .send({success: true, message: request.t('invitationSentSuccess')});
                                     } else {
                                         console.log('No Company data')
+                                        logger.warn(`Failed to send invitation to ${request.body.email}`)
                                         return response.status(200)
-                                                .send({success: false, message: 'Failed to send invitation'});
+                                                .send({success: false, message: request.t('invitationSentFailed')});
                                     }
                                 })
                                 .catch((err) => {
+                                    logger.warn(`Failed to send invitation to ${request.body.email}`)
                                     logger.error(err)
-                                    console.log(err)
                                     return response.status(200)
-                                            .send({success: false, message: 'Failed to send invitation'});
+                                            .send({success: false, message: request.t('invitationSentFailed')});
                                 })
                             })
                             .catch((err) => {
+                                logger.warn(`Failed to send invitation to ${request.body.email}`)
                                 logger.error(err)
-                                console.log(err)
                                 return response.status(200)
-                                        .send({success: false, message: 'Failed to send invitation'});
+                                        .send({success: false, message: request.t('invitationSentFailed')});
                             })
                         })
                         .catch((err) => {
+                            logger.warn(`Failed to send invitation to ${request.body.email}`)
                             logger.error(err)
-                            console.log(err)
                             return response.status(200)
-                                    .send({success: false, message: 'Failed to send invitation'});
+                                    .send({success: false, message: request.t('invitationSentFailed')});
                         })
                     } else {
+                        logger.info(`Invitation already exists for ${request.body.email}`)
                         return response.status(200)
-                            .send({success: false, message: 'Invitation already sent, delete that and try again'});
+                            .send({success: false, message: request.t('invitationAlreadySent')});
                     }
                 })
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to send invitation to ${request.body.email}`)
             logger.error(err)
-            console.log(err)
             return response.status(200)
-                    .send({success: false, message: 'Failed to send invitation'});
+                    .send({success: false, message: request.t('invitationSentFailed')});
         })
     }
 
     static getInvitationList(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Fetching invitation list for company Id ${request.body.companyId}`)
         if(request.body.searchString && request.body.searchString != '') {
             user.searchUser(
                 request.body.searchString,
@@ -913,14 +1019,16 @@ class UsersController {
                 )
                 .then((recordCounts) => {
                     const {totalPageNum, noOfRecords} = recordCounts
+                    logger.info(`Invitation list successfully fetched for company Id ${request.body.companyId}`)
                     return response.status(200)
                         .send({success: true, invitationList, totalPageNum, noOfRecords});
                 })
             })
             .catch((err) => {
+                logger.warn(`Failed to fetch invitation list for ${request.body.companyId}`)
                 logger.error(err)
                 return response.status(200)
-                    .send({success: false, message: 'Failed to fetch invitation list'});
+                    .send({success: false, message: request.t('invitationListFetchFailed')});
             })
         } else {
             user.getInvitationList(
@@ -932,14 +1040,16 @@ class UsersController {
                 user.getTotalNumberOfPageForInvitationList(request.body.limit, request.body.companyId)
                 .then((recordCounts) => {
                     const {totalPageNum, noOfRecords} = recordCounts
+                    logger.info(`Invitation list successfully fetched for company Id ${request.body.companyId}`)
                     return response.status(200)
                         .send({success: true, invitationList, totalPageNum, noOfRecords});
                 })
             })
             .catch((err) => {
+                logger.warn(`Failed to fetch invitation list for ${request.body.companyId}`)
                 logger.error(err)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to fetch invitation list'});
+                        .send({success: false, message: request.t('invitationListFetchFailed')});
             })
         }
     }
@@ -947,11 +1057,14 @@ class UsersController {
     static deleteInvitations(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Deleting invitations for company ID ${request.body.companyId}`)
         user.deleteInvitations(
             request.body.invitationIds
         )
         .then((res) => {
             if(res == 1) {
+                logger.info(`Invitations deleted successfully for ${request.body.companyId}`)
+                logger.info(`Fetching updated list for company ID ${request.body.companyId}`)
                 user.getInvitationList(
                     0,
                     request.body.limit,
@@ -961,34 +1074,40 @@ class UsersController {
                     user.getTotalNumberOfPageForInvitationList(request.body.limit, request.body.companyId)
                     .then((recordCounts) => {
                         const {totalPageNum, noOfRecords} = recordCounts
+                        logger.info(`Updated invitation list fetched successfully for ${request.body.companyId}`)
                         return response.status(200)
-                            .send({success: true, invitationList, totalPageNum, noOfRecords, message: 'Users deleted successfully'});
+                            .send({success: true, invitationList, totalPageNum, noOfRecords, message: request.t('userDeletionSuccess')});
                     })
                 })
                 .catch((err) => {
                     logger.error(err)
-                    console
+                    logger.warn(`Failed to fetch the updated the invitation list for company ID ${request.body.companyId}`)
                     return response.status(200)
-                            .send({success: false, message: 'Users deleted successfully, but failed to fetch updated invitation list'});
+                            .send({success: false, message: request.t('userDeletionFailed1')});
                 })
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to delete the invitations for ${request.body.companyId}`)
             logger.error(err)
-            console.log(err)
             return response.status(200)
-                .send({success: false, message: 'Failed to delete invitations'});
+                .send({success: false, message: request.t('userDeletionFailed2')});
         })
     }
 
     static deleteInvitation(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Deleting invitation for company ID ${request.body.companyId}`)
+        
+        logger.warn(`Failed to delete the invitations for ${request.body.companyId}`)
         user.deleteInvitation(
             request.body.invitationId
         )
         .then((res) => {
             if(res == 1) {
+                logger.info(`Invitation deleted successfully for ${request.body.companyId}`)
+                logger.info(`Fetching updated list for company ID ${request.body.companyId}`)
                 user.getInvitationList(
                     0,
                     request.body.limit,
@@ -998,34 +1117,38 @@ class UsersController {
                     user.getTotalNumberOfPageForInvitationList(request.body.limit, request.body.companyId)
                     .then((recordCounts) => {
                         const {totalPageNum, noOfRecords} = recordCounts
+                        logger.info(`Updated invitation list fetched successfully for ${request.body.companyId}`)
                         return response.status(200)
-                            .send({success: true, invitationList, totalPageNum, noOfRecords, message: 'User deleted successfully'});
+                            .send({success: true, invitationList, totalPageNum, noOfRecords, message: request.t('userDeletionSuccess')});
                     })
                 })
                 .catch((err) => {
+                    logger.warn(`Failed to fetch the updated the invitation list for company ID ${request.body.companyId}`)
                     logger.error(err)
-                    console
                     return response.status(200)
-                            .send({success: false, message: 'User deleted successfully, but failed to fetch updated invitation list'});
+                            .send({success: false, message: request.t('userDeletionFailed1')});
                 })
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to delete the invitation for ${request.body.companyId}`)
             logger.error(err)
-            console.log(err)
             return response.status(200)
-                .send({success: false, message: 'Failed to delete invitations'});
+                .send({success: false, message: request.t('userDeletionFailed2')});
         })
     }
 
     static resendInvitation(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Resending invitation to ${request.body.email}`)
+        logger.info(`Checking if account registered under ${request.body.email}`)
         user.checkIfUserExist(request.body.email)
         .then((res) => {
             if(res.length > 0) {
+                logger.info(`Account exist under ${request.body.email}`)
                 return response.status(200)
-                    .send({success: false, message: 'Cannot send invitation, account already registered for this email'});
+                    .send({success: false, message: request.t('invitationSendFailedAlreadyRegistered')});
             } else {
                 user.isInvitationSent(request.body.email)
                 .then((inviteSent) => {
@@ -1033,6 +1156,7 @@ class UsersController {
                         user.getInvitationDetail(request.body.email)
                         .then((inviteData) => {
                             if(inviteData && inviteData.status != 'Registered') {
+                                logger.info(`Cannot resend invitation, invitation already reagistered for ${request.body.email}`)
                                 user.updateInvitationToken(request.body.email)
                                 .then((data) => {
                                     const { res, token } = data
@@ -1060,11 +1184,13 @@ class UsersController {
                                     
                                                     transporter.sendMail(mailOptions2, function(error, info){
                                                         if(error){
+                                                            logger.warn(`Failed to resend invitation for ${request.body.email}`)
                                                             logger.error(error.message)
                                                             return response.status(200)
-                                                            .send({success: false, message: 'Failed to send invitation email'});;
+                                                            .send({success: false, message: request.t('invitationSentFailed')});;
                                                         }
                                                         
+                                                        logger.info(`Fetching updated invitation list`)
                                                         user.getInvitationList(
                                                             request.body.offset,
                                                             request.body.limit,
@@ -1074,46 +1200,53 @@ class UsersController {
                                                             user.getTotalNumberOfPageForInvitationList(request.body.limit, request.body.companyId)
                                                             .then((recordCounts) => {
                                                                 const {totalPageNum, noOfRecords} = recordCounts
+                                                                logger.info(`Updated invitation list fetched successfully`)
                                                                 return response.status(200)
-                                                                    .send({success: true, invitationList, totalPageNum, noOfRecords, message: 'Invitation sent successfully'});
+                                                                    .send({success: true, invitationList, totalPageNum, noOfRecords, message: request.t('invitationSentSuccess')});
                                                             })
                                                         })
                                                         .catch((err) => {
                                                             logger.error(err)
-                                                            console
+                                                            logger.warn(`Failed to resend invitation to ${request.body.email}`)
                                                             return response.status(200)
-                                                                    .send({success: false, message: 'Failed to send invitation'});
+                                                                    .send({success: false, message: request.t('invitationSentFailed')});
                                                         })
                                                     });
                                                 } else {
+                                                    logger.warn(`Failed to resend invitation to ${request.body.email}`)
                                                     return response.status(200)
-                                                            .send({success: false, message: 'Failed to send invitation'});
+                                                            .send({success: false, message: request.t('invitationSentFailed')});
                                                 }
                                             })
                                             .catch((err) => {
+                                                logger.warn(`Failed to resend invitation to ${request.body.email}`)
                                                 logger.error(err)
                                                 return response.status(200)
-                                                        .send({success: false, message: 'Failed to send invitation'});
+                                                        .send({success: false, message: request.t('invitationSentFailed')});
                                             })
                                         })
                                         .catch((err) => {
+                                            logger.warn(`Failed to resend invitation to ${request.body.email}`)
                                             logger.error(err)
                                             return response.status(200)
-                                                .send({success: false, message: 'Failed to send invitation'});
+                                                .send({success: false, message: request.t('invitationSentFailed')});
                                         })
                                     } else {
+                                        logger.warn(`Failed to resend invitation to ${request.body.email}`)
                                         return response.status(200)
-                                            .send({success: false, message: 'Failed to send invitation'});
+                                            .send({success: false, message: request.t('invitationSentFailed')});
                                     }
                                 })
                             } else {
+                                logger.warn(`Failed to resend invitation to ${request.body.email}`)
                                 return response.status(200)
-                                    .send({success: false, message: 'Failed to send invitation, invitation already registered'});
+                                    .send({success: false, message: request.t('invitationSendFailedAlreadyRegistered')});
                             }
                         })
                     } else {
+                        logger.warn(`Failed to resend invitation to ${request.body.email}`)
                         return response.status(200)
-                            .send({success: false, message: 'Invitation not found'});
+                            .send({success: false, message: request.t('invitationNotExist')});
                     }
                 })
             }
@@ -1123,6 +1256,7 @@ class UsersController {
     static getInvitationData(request, response) {
         const user = new Users(knex) 
 
+        logger.info(`Fetching invitation detail for ${request.body.email}`)
         user.getInvitationDetail(request.body.email)
         .then((invitationData) => {
             if(invitationData) {
@@ -1132,29 +1266,37 @@ class UsersController {
                 if(invitationData.status == 'Pending') {
                     if(tDiff < 43200000) {
                         if(invitationData.token == request.body.token) {
+                            logger.info(`Valid invitation provided by ${request.body.email}`)
                             return response.status(200)
                             .send({success: true, status: 'valid', invitationData});
                         } else {
+                            logger.warn(`Invalid invitation provided by ${request.body.email}`)
                             return response.status(200)
                             .send({success: false, status: 'invalid-token'});
                         }
                     } else {
+                        logger.info(`Expired invitation provided by ${request.body.email}`)
                         return response.status(200)
                             .send({success: false, status: 'expired'});
                     }
                 } else if(invitationData.status == 'Declined') {
+                    logger.info(`Declined invitation provided by ${request.body.email}`)
                     return response.status(200)
                         .send({success: false, status: 'declined'});
                 } else if(invitationData.status == 'Registered') {
+                    logger.info(`Registered invitation provided by ${request.body.email}`)
                     return response.status(200)
                         .send({success: false, status: 'registered'});
                 }
             } else {
+                logger.warn(`Invalid invitation provided by ${request.body.email}`)
                 return response.status(200)
                         .send({success: false, status: 'invalid'});
             }
         })
         .catch((err) => {
+            logger.warn(`Invalid invitation provided by ${request.body.email}`)
+            logger.error(err)
             return response.status(200)
                         .send({success: false, status: 'invalid'});
         })
@@ -1163,6 +1305,7 @@ class UsersController {
     static createAccountForInvitedUser(request, response) {
         const user = new Users(knex) 
 
+        logger.info(`Creating account for invited user ${request.body.email}`)
         user.getInvitationDetail(request.body.email)
         .then((invitationData) => {
             if(invitationData) {
@@ -1231,69 +1374,84 @@ class UsersController {
                                                             if(error){
                                                                 logger.error(error.message)
                                                             }
+                                                            logger.info(`Acceptance mail sent to invitation sender ${senderData.email}`)
                                                         });
                                                     })
 
+                                                    logger.info(`Account created for ${request.body.email}`)
                                                     return response.status(200)
-                                                        .send({ success: true, message: 'Authentication Success', userData, twoFactorAuth: companyData.twoFactorAuth });
+                                                        .send({ success: true, message: request.t('Authentication success'), userData, twoFactorAuth: companyData.twoFactorAuth });
                                                 })
                                             })
                                             .catch((err) => {
-                                                console.log(err)
+                                                logger.warn(`Account creation failed for ${request.body.email}`)
+                                                logger.error(err)
                                                 return response.status(200)
-                                                    .send({ success: false, message: 'Account creation failed' })
+                                                    .send({ success: false, message: request.t('accountCreationFailed') })
                                             })
                                         })
                                         .catch((err) => {
-                                            console.log(err)
+                                            logger.warn(`Account creation failed for ${request.body.email}`)
+                                            logger.error(err)
                                             return response.status(200)
-                                            .send({ success: false, message: 'Account creation failed' })
+                                            .send({ success: false, message: request.t('accountCreationFailed') })
                                         })
                                     })
                                     .catch((err) => {
-                                        console.log(err)
+                                        logger.warn(`Account creation failed for ${request.body.email}`)
+                                        logger.error(err)
                                         return response.status(200)
-                                        .send({ success: false, message: 'Account creation failed' })
+                                        .send({ success: false, message: request.t('accountCreationFailed') })
                                     })
                                 } else {
+                                    logger.warn(`Account creation failed for ${request.body.email} due to invalid company`)
                                     return response.status(200)
-                                        .send({ success: false, message: 'Account creation failed due to invalid company' })
+                                        .send({ success: false, message: request.t('accountCreationFailedInvalidCompany') })
                                 }
                             })
                             .catch((err) => {
+                                logger.warn(`Account creation failed for ${request.body.email} due to invalid company`)
                                 logger.error(err)
                                 return response.status(200)
-                                        .send({ success: false, message: 'Account creation failed due to invalid company' })
+                                        .send({ success: false, message: request.t('accountCreationFailedInvalidCompany') })
                             })
                         } else {
+                            logger.warn(`Account creation failed for ${request.body.email} due to invalid token`)
                             return response.status(200)
-                            .send({success: false, message: 'Invalid token provided'});
+                            .send({success: false, message: request.t('invalidToken')});
                         }
                     } else {
+                        logger.warn(`Account creation failed for ${request.body.email} due to expired invitation`)
                         return response.status(200)
-                            .send({success: false, message: 'Invitation expired'});
+                            .send({success: false, message: request.t('invitationExpired')});
                     }
                 } else if(invitationData.status == 'Declined') {
+                    logger.warn(`Account creation failed for ${request.body.email} due to declined invitation`)
                     return response.status(200)
-                        .send({success: false, message: 'This invitation have already been declined'});
+                        .send({success: false, message: request.t('invitationDeclined')});
                 } else if(invitationData.status == 'Registered') {
+                    logger.warn(`Account creation failed for ${request.body.email} due to registered invitation`)
                     return response.status(200)
-                        .send({success: false, message: 'Account already registered with this invitation'});
+                        .send({success: false, message: request.t('accountAlreadyRegistered')});
                 }
             } else {
+                logger.warn(`Account creation failed for ${request.body.email} due to invalid invitation`)
                 return response.status(200)
-                        .send({success: false, message: 'Invalid invitation provided'});
+                        .send({success: false, message: request.t('invalidInvitation')});
             }
         })
         .catch((err) => {
+            logger.warn(`Account creation failed for ${request.body.email} due to invalid invitation`)
+            logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Invalid invitation provided'});
+                        .send({success: false, message: request.t('invalidInvitation')});
         })
     }
 
     static declineInvitation(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Declining invitation for ${request.body.email}`)
         user.getInvitationDetail(request.body.email)
         .then((invitationData) => {
             if(invitationData) {
@@ -1326,217 +1484,261 @@ class UsersController {
                                                     if(error){
                                                         logger.error(error.message)
                                                     }
+                                                    logger.info(`Decline mail sent to invitation sender ${senderData.email}`)
                                                 });
                                             })
+                                            logger.info(`Invitation declined for ${request.body.email}`)
                                             return response.status(200)
-                                                .send({ success: true, message: 'Invitation declined' })                               	
+                                                .send({ success: true, message: request.t('invitationDeclineSuccess') })                               	
                                         } else {
+                                            logger.warn(`Failed to decline invitation for ${request.body.email}`)
                                             return response.status(200)
-                                                .send({ success: true, status: 'failed', message: 'Failed to decline invitation' })
+                                                .send({ success: true, status: 'failed', message: request.t('invitationDeclineFailed') })
                                         }
                                     })
                                 } else {
+                                    logger.warn(`Failed to decline invitation for ${request.body.email}`)
                                     return response.status(200)
-                                        .send({ success: false, status: 'failed', message: 'Failed to decline invitation' })
+                                        .send({ success: false, status: 'failed', message: request.t('invitationDeclineFailed') })
                                 }
                             })
                             .catch((err) => {
+                                logger.warn(`Failed to decline invitation for ${request.body.email}`)
                                 logger.error(err)
                                 return response.status(200)
-                                        .send({ success: false, status: 'failed', message: 'Failed to decline invitation' })
+                                        .send({ success: false, status: 'failed', message: request.t('invitationDeclineFailed') })
                             })
                         } else {
+                            logger.warn(`Failed to decline invitation for ${request.body.email} due to invalid token`)
                             return response.status(200)
-                            .send({success: false, status: 'invalid-token', message: 'Failed to decline invitation, invalid token provided'});
+                            .send({success: false, status: 'invalid-token', message: request.t('invitationDeclineFailedInvalidToken')});
                         }
                     } else {
+                        logger.warn(`Failed to decline invitation for ${request.body.email} due to expired invitation`)
                         return response.status(200)
-                            .send({success: false, status: 'expired', message: 'Invitation expired'});
+                            .send({success: false, status: 'expired', message: request.t('invitationExpired')});
                     }
                 } else if(invitationData.status == 'Declined') {
+                    logger.warn(`Failed to decline invitation for ${request.body.email} due to declined invitation`)
                     return response.status(200)
-                        .send({success: false, status: 'declined', message: 'This invitation have already been declined'});
+                        .send({success: false, status: 'declined', message: request.t('invitationDeclined')});
                 } else if(invitationData.status == 'Registered') {
+                    logger.warn(`Failed to decline invitation for ${request.body.email} due to registered invitation`)
                     return response.status(200)
-                        .send({success: false, status: 'registered', message: 'Account already registered with this invitation'});
+                        .send({success: false, status: 'registered', message: request.t('accountAlreadyRegistered')});
                 }
             } else {
+                logger.warn(`Failed to decline invitation for ${request.body.email} due to invalid invitation`)
                 return response.status(200)
-                        .send({success: false, status: 'invalid', message: 'Invalid invitation provided'});
+                        .send({success: false, status: 'invalid', message: request.t('invalidInvitation')});
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to decline invitation for ${request.body.email} due to invalid invitation`)
+            logger.error(err)
             return response.status(200)
-                        .send({success: false, status: 'invalid', message: 'Invalid invitation provided'});
+                        .send({success: false, status: 'invalid', message: request.t('invalidInvitation')});
         })
     }
 
     static getUserDetailsForAdmin(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Fetching user details for user ID ${request.body.userId}`)
         user.getUserDetailsById(request.body.userId)
         .then((userData) => {
             user.getCompanyRole(request.body.userId)
             .then((roleData) => {
                 userData = {...userData, role: roleData.role}
+                logger.info(`User details successfully fethced for ${request.body.userId}`)
                 return response.status(200)
-                .send({success: true, message: 'User data fetched successfully', userData});
+                .send({success: true, message: request.t('adminUserDetailFetchSuccess'), userData});
             })
             .catch((err) => {
+                logger.warn(`User details successfully fethced but failed to fetch role data for ${request.body.userId}`)
+                logger.error(err)
                 userData = {...userData, role: '3'}
                 return response.status(200)
-                .send({success: true, message: 'User data fetched successfully, but failed to fetch role data', userData});
+                .send({success: true, message: request.t('adminUserDetailFetchFailed1'), userData});
             })
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to fetch user details for user ID ${request.body.userId}`)
             return response.status(200)
-                .send({success: false, message: 'Failed to fetch user data'});
+                .send({success: false, message: request.t('adminUserDetailFetchFailed2')});
         })
     }
 
     static verifyAccountForAdmin(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Verifying account for user Id ${request.body.userId}`)
         user.verifyAccount(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Account verification success for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: true, message: 'Account verification complete'});
+                    .send({success: true, message: request.t('accountVerificationSuccess')});
             } else {
+                logger.warn(`Account verification failed for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: false, message: 'Account verification failed'});
+                    .send({success: false, message: request.t('accountVerificationFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Account verification failed for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
-                    .send({success: false, message: 'Account verification failed'});
+                    .send({success: false, message: request.t('accountVerificationFailed')});
         })
     }
 
     static enable2FAFordmin(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Enabling 2FA for user Id ${request.body.userId}`)
         user.enable2FA(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`2FA enabled successfully for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: true, message: 'Two factor authentication enabled'});
+                        .send({success: true, message: request.t('2FAEnableSuccess')});
             } else {
+                logger.warn(`Failed to enable 2FA for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to enable two factor authentication'});
+                        .send({success: false, message: request.t('2FAEnableFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to enable 2FA for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to enable two factor authentication'});
+                        .send({success: false, message: request.t('2FAEnableFailed')});
         })
     }
 
     static disable2FAFordmin(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Disabling 2FA for ${request.body.userId}`)
         user.disable2FA(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`2FA disabled successfully for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: true, message: 'Two factor authentication disabled'});
+                        .send({success: true, message: request.t('2FADisableSuccess')});
             } else {
+                logger.warn(`Failed to disable 2FA for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to disable two factor authentication'});
+                        .send({success: false, message: request.t('2FADisableFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to disable 2FA for ${request.body.userId}`)
             logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to disable two factor authentication'});
+                        .send({success: false, message: request.t('2FADisableFailed')});
         })
     }
 
     static userLockAndUnlockOptionForAdmin(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Changing account status for user Id ${request.body.userId}`)
         user.userLockAndUnlockOptionForAdmin(request.body.userId, request.body.status)
         .then((res) => {
             if(res == 1) {
                 if(request.body.status == '1') {
+                    logger.info(`Account status changed to locked for ${request.body.userId}`)
                     return response.status(200)
-                        .send({success: true, message: 'User account locked successfully'});
+                        .send({success: true, message: request.t('userAccountLockedSuccess')});
                 } else {
+                    logger.info(`Account status changed to unlocked for ${request.body.userId}`)
                     return response.status(200)
-                        .send({success: true, message: 'User account unlocked successfully'});
+                        .send({success: true, message: request.t('userAccountUnlockedSuccess')});
                 }
             } else {
+                logger.warn(`Failed to change the account status for ${request.body.userId}`)
                 return response.status(200)
-                        .send({success: false, message: 'Failed to change account status'});
+                        .send({success: false, message: request.t('userAccountLockFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to change the account status for ${request.body.userId}`)
+            logger.error(err)
             return response.status(200)
-                        .send({success: false, message: 'Failed to change account status'});
+                        .send({success: false, message: request.t('userAccountLockFailed')});
         })
     }
 
     static adminUpdatePasswordOptionForUser(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Updating password for ${request.body.userId}`)
         user.updatePassword(request.body.userId, request.body.newPassword)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Password updated successfully for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: true, message: 'Password updated successfully for user'});
+                    .send({success: true, message: request.t('adminPasswordUpdateSuccess')});
             } else {
+                logger.warn(`Failed to update the password for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: false, message: 'Failed to update password for user'});
+                    .send({success: false, message: request.t('adminPasswordUpdateFailed')});
             }
         })
         .catch((err) => {
-            console.log(err)
+            logger.warn(`Failed to update the password for ${request.body.userId}`)
+            logger.error(err)
             return response.status(200)
-                    .send({success: false, message: 'Failed to update password for user'});
+                    .send({success: false, message: request.t('adminPasswordUpdateFailed')});
         })
     }
 
     static whiteListUserAccount(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Whitelisting account for ${request.body.userId}`)
         user.whiteListAccount(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Account whitelisted for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: true, message: 'Account whitelisted successfully'});
+                    .send({success: true, message: request.t('accountWhitelistedSuccess')});
             } else {
+                logger.warn(`Failed to whitelist account for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: false, message: 'Failed to whitelist the account'});
+                    .send({success: false, message: request.t('accountWhitelistedFailed')});
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to whitelist account for ${request.body.userId}`)
+            logger.error(err)
             return response.status(200)
-                    .send({success: false, message: 'Failed to whitelist the account'});
+                    .send({success: false, message: request.t('accountWhitelistedFailed')});
         })
     }
     static blackListUserAccount(request, response) {
         const user = new Users(knex)
 
+        logger.info(`Blacklisting account for ${request.body.userId}`)
         user.blackListAccount(request.body.userId)
         .then((res) => {
             if(res == 1) {
+                logger.info(`Account blacklisted for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: true, message: 'Account blacklisted successfully'});
+                    .send({success: true, message: request.t('accountBlacklistedSuccess')});
             } else {
+                logger.warn(`Failed to blacklist the account for ${request.body.userId}`)
                 return response.status(200)
-                    .send({success: false, message: 'Failed to blacklist the account'});
+                    .send({success: false, message: request.t('accountBlacklistedFailed')});
             }
         })
         .catch((err) => {
+            logger.warn(`Failed to blacklist the account for ${request.body.userId}`)
+            logger.error(err)
             return response.status(200)
-                    .send({success: false, message: 'Failed to blacklist the account'});
+                    .send({success: false, message: request.t('accountBlacklistedFailed')});
         })
     }
 }

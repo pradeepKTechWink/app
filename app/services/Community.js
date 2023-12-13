@@ -2,14 +2,15 @@ const { create } = require("express-handlebars");
 const user = require("../routes/user")
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
-
+const dotenv = require('dotenv');
+dotenv.config();
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: combine(timestamp(), json()),
   transports: [
     new winston.transports.File({
-      filename: '../../logs/combined.log',
+      filename: process.env.LOG_FILE_PATH,
     }),
   ],
 });

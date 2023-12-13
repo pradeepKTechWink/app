@@ -16,6 +16,8 @@ const fs = require('fs')
 const i18next = require('i18next');
 const Backend = require('i18next-fs-backend')
 const i18nextMiddleware  = require('i18next-http-middleware')
+const winston = require('winston');
+const { combine, timestamp, json } = winston.format;
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -41,9 +43,19 @@ const knex = require('knex')({
   }
 });
 
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: combine(timestamp(), json()),
+  transports: [
+    new winston.transports.File({
+      filename: process.env.LOG_FILE_PATH,
+    }),
+  ],
+});
+
 const userAvatarStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, './uploads/userAvatars')
+    cb(null, `${process.env.BACKEND_PATH}/uploads/userAvatars`)
   },
   filename: function (req, file, cb) {
     const fileName = req.body.userId + '-' + Math.round(Math.random() * 1E5) + path.extname(file.originalname)
@@ -56,7 +68,7 @@ const userAvatarUpload = multer({ storage: userAvatarStorage })
 
 const companyLogosStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, './uploads/companyLogos')
+    cb(null, `${process.env.BACKEND_PATH}/uploads/companyLogos`)
   },
   filename: function (req, file, cb) {
     const fileName = req.body.companyId + '-' + Math.round(Math.random() * 1E5) + path.extname(file.originalname)
@@ -70,10 +82,11 @@ const companyLogoUpload = multer({ storage: companyLogosStorage })
 const documentStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const community = new Community(knex)
+    const documents = new Documents(knex)
     community.getCommunityAlias(req.query.communityId)
     .then((alias) => {
       req.filePath = path.resolve(`${process.env.DOCUMENT_PATH}/${alias}`)
-      cb(null, `./documents/${alias}`)
+      cb(null, `${process.env.BACKEND_PATH}/documents/${alias}`)
     })
   },
   filename: function (req, file, cb) {
@@ -100,26 +113,29 @@ app.use(function(req, res, next) {
 
 app.use(parser.urlencoded({ extended: true }));
 app.use(parser.json());
-app.use('/user-avatars', express.static('uploads/userAvatars'));
-app.use('/company-logos', express.static('uploads/companyLogos'));
+app.use('/user-avatars', express.static(`${process.env.BACKEND_PATH}/uploads/userAvatars`));
+app.use('/company-logos', express.static(`${process.env.BACKEND_PATH}/uploads/companyLogos`));
 
 app.use(usersRoute());
 app.use(communityRoute());
 app.use(documentRoute());
 app.use(chatRoute());
 
-app.post('/user-profile', auth.verifyToken, userAvatarUpload.single('image'), function (request, response) {
+app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), function (request, response) {
   const user = new Users(knex)
 
+  logger.info(`Updating profile for user Id ${request.body.userId}`)
   if(request.file) {
+      logger.info(`Update request include new profile picture`)
+      logger.info(`Deleting old profile picture`)
       user.getUserMetaValue(request.body.userId, 'profilePic')
       .then((oldImageName) => {
         if(oldImageName && oldImageName != 'default.png') {
-          const filePath = `./uploads/userAvatars/${oldImageName}`; 
+          const filePath = `${process.env.BACKEND_PATH}/uploads/userAvatars/${oldImageName}`; 
           fs.unlinkSync(filePath)
         }
       })
-
+      logger.info(`Old profile picture deleted successfully`)
       user.updateUser(
         request.body.userId,
         request.body.firstname,
@@ -129,24 +145,31 @@ app.post('/user-profile', auth.verifyToken, userAvatarUpload.single('image'), fu
       )
       .then((res) => {
           if(res == 1) {
+            logger.info(`Profile updated successfully`)
+            logger.info(`Fetching updated user details for user ${request.body.userId}`)
             user.getUserDetailsById(request.body.userId)
               .then((data) => {
+                  logger.info(`Updated user data fetched successfully`)
                   let userData = data
 
                   return response.status(200)
                       .send({success: true, message: request.t('userProfileUpdateSuccess'), userData});
               })
           } else {
+              logger.warn(`Failed to fetch updated user details`)
               return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
           }
       })
       .catch((err) => {
           console.log(err)
+          logger.warn(`Profile updated failed for ${request.body.userId}`)
+          logger.error(err)
           return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
       })
   } else {
+      logger.info(`Update request does not contain profile picture`)
       user.updateUser(
           request.body.userId,
           request.body.firstname,
@@ -156,20 +179,26 @@ app.post('/user-profile', auth.verifyToken, userAvatarUpload.single('image'), fu
       )
       .then((res) => {
           if(res == 1) {
+            logger.info(`Profile updated successfully`)
+            logger.info(`Fetching updated user details for user ${request.body.userId}`)
             user.getUserDetailsById(request.body.userId)
             .then((data) => {
+                logger.info(`Updated user data fetched successfully`)
                 let userData = data
 
                 return response.status(200)
                     .send({success: true, message: request.t('userProfileUpdateSuccess'), userData});
             })
           } else {
+              logger.warn(`Failed to fetch updated user details`)
               return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
           }
       })
       .catch((err) => {
           console.log(err)
+          logger.warn(`Profile updated failed for ${request.body.userId}`)
+          logger.error(err)
           return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
       })
@@ -177,18 +206,21 @@ app.post('/user-profile', auth.verifyToken, userAvatarUpload.single('image'), fu
 })
 
 
-app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpload.single('image'), function (request, response) {
+app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatarUpload.single('image'), function (request, response) {
   const user = new Users(knex)
 
+  logger.info(`Updating profile for user Id ${request.body.userId} by admin`)
   if(request.file) {
+      logger.info(`Update request include new profile picture`)
+      logger.info(`Deleting old profile picture`)
       user.getUserMetaValue(request.body.userId, 'profilePic')
       .then((oldImageName) => {
         if(oldImageName && oldImageName != 'default.png') {
-          const filePath = `./uploads/userAvatars/${oldImageName}`; 
+          const filePath = `${process.env.BACKEND_PATH}/uploads/userAvatars/${oldImageName}`; 
           fs.unlinkSync(filePath)
         }
       })
-
+      logger.info(`Old profile picture deleted successfully`)
       user.adminUserUpdate(
           request.body.userId,
           request.body.firstname,
@@ -199,6 +231,8 @@ app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpl
       )
       .then((res) => {
           if(res == 1) {
+            logger.info(`Profile updated successfully by admin`)
+            logger.info(`Updating user role`)
             user.adminRoleUpdateForUser(
               request.body.userId,
               request.body.companyId,
@@ -206,8 +240,11 @@ app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpl
             )
             .then((res) => {
               if(res == 1) {
+                logger.info(`User role updated successfully`)
+                logger.info(`Fetching updated user details for user ${request.body.userId}`)
                 user.getUserDetailsById(request.body.userId)
                 .then((data) => {
+                    logger.info(`Updated user data fetched successfully`)
                     let userData = data
                     userData = {...userData, role: request.body.role}
 
@@ -216,30 +253,39 @@ app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpl
                 })
                 .catch((err) => {
                   console.log(err)
+                  logger.warn(`Failed to fetch updated user details`)
+                  logger.error(err)
                   return response.status(200)
                         .send({success: true, message: request.t('adminAserProfileUpdateSuccessFetchFailed'), userData});
                 })
               } else {
+                logger.warn(`Failed to update role by admin`)
                 return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
               }
             })
             .catch((err) => {
               console.log(err)
+              logger.warn(`Failed to update role by admin`)
+              logger.error(err)
               return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
             })
           } else {
+              logger.warn(`Profile update by admin failed`)
               return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
           }
       })
       .catch((err) => {
           console.log(err)
+          logger.warn(`Profile update by admin failed`)
+          logger.error(err)
           return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
       })
   } else {
+      logger.info(`Update request does not contain profile picture`)
       user.adminUserUpdate(
           request.body.userId,
           request.body.firstname,
@@ -250,6 +296,8 @@ app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpl
       )
       .then((res) => {
           if(res == 1) {
+            logger.info(`Profile updated successfully by admin`)
+            logger.info(`Updating user role`)
             user.adminRoleUpdateForUser(
               request.body.userId,
               request.body.companyId,
@@ -257,8 +305,11 @@ app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpl
             )
             .then((res) => {
               if(res == 1) {
+                logger.info(`User role updated successfully`)
+                logger.info(`Fetching updated user details for user ${request.body.userId}`)
                 user.getUserDetailsById(request.body.userId)
                 .then((data) => {
+                    logger.info(`Updated user data fetched successfully`)
                     let userData = data
                     userData = {...userData, role: request.body.role}
 
@@ -267,44 +318,55 @@ app.post('/admin-user-update', auth.verifyToken, auth.adminAccess, userAvatarUpl
                 })
                 .catch((err) => {
                   console.log(err)
+                  logger.warn(`Failed to fetch updated user details`)
+                  logger.error(err)
                   return response.status(200)
                         .send({success: true, message: request.t('adminAserProfileUpdateSuccessFetchFailed'), userData});
                 })
               } else {
+                logger.warn(`Failed to update role by admin`)
                 return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
               }
             })
             .catch((err) => {
               console.log(err)
+              logger.warn(`Failed to update role by admin`)
+              logger.error(err)
               return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
             })
           } else {
+              logger.warn(`Profile update by admin failed`)
               return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
           }
       })
       .catch((err) => {
           console.log(err)
+          logger.warn(`Profile update by admin failed`)
+          logger.error(err)
           return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
       })
   }
 })
 
-app.post('/company-profile', auth.verifyToken, auth.adminAccess, companyLogoUpload.single('image'), function (request, response) {
+app.post('/company/update-profile', auth.verifyToken, auth.adminAccess, companyLogoUpload.single('image'), function (request, response) {
   const user = new Users(knex)
 
+  logger.info(`Updating company profile for id ${request.body.companyId}`)
   if(request.file) {
+      logger.info(`Update request contain company profile picture`)
+      logger.info(`Deleting old profile picture`)
       user.getCompanyMetaValue(request.body.companyId, 'companyLogo')
       .then((oldImageName) => {
         if(oldImageName && oldImageName != 'default.png') {
-          const filePath = `./uploads/companyLogos/${oldImageName}`; 
+          const filePath = `${process.env.BACKEND_PATH}/uploads/companyLogos/${oldImageName}`; 
           fs.unlinkSync(filePath)
         }
       })
-
+      logger.info(`Old profile picture deleted successfully`)
       user.updateCompany(
         request.body.companyId,
         request.body.phoneNumber,
@@ -323,24 +385,31 @@ app.post('/company-profile', auth.verifyToken, auth.adminAccess, companyLogoUplo
       )
       .then((res) => {
           if(res == 1) {
+            logger.info(`Company profile updated successfully`)
+            logger.info(`Fetching updated company details`)
             user.getCompanyDetails(request.body.companyId)
               .then((data) => {
+                  logger.info(`Updated company details fetched successfully`)
                   let companyData = data
 
                   return response.status(200)
                       .send({success: true, message: request.t('companyProfileUpdateSuccess'), companyData});
               })
           } else {
+              logger.warn(`Company profile update failed `)
               return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
           }
       })
       .catch((err) => {
+          logger.warn(`Company profile update failed `)
+          logger.error(err)
           console.log(err)
           return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
       })
   } else {
+      logger.info(`Update request does not contain profile picture`)
       user.updateCompany(
           request.body.companyId,
           request.body.phoneNumber,
@@ -359,82 +428,98 @@ app.post('/company-profile', auth.verifyToken, auth.adminAccess, companyLogoUplo
       )
       .then((res) => {
           if(res == 1) {
+            logger.info(`Company profile updated successfully`)
+            logger.info(`Fetching updated company details`)
             user.getCompanyDetails(request.body.companyId)
             .then((data) => {
+                logger.info(`Updated company details fetched successfully`)
                 let companyData = data
 
                 return response.status(200)
                     .send({success: true, message: request.t('companyProfileUpdateSuccess'), companyData});
             })
           } else {
+              logger.warn(`Company profile update failed `)
               return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
           }
       })
       .catch((err) => {
           console.log(err)
+          logger.warn(`Company profile update failed `)
+          logger.error(err)
           return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
       })
   }
 })
 
-app.post('/upload-document', auth.verifyToken, documentUpload.single('file'), async function (request, response) {
+app.post('/file-manager/upload-file', auth.verifyToken, auth.checkForDuplicateFile, documentUpload.single('file'), async function (request, response) {
   const documents = new Documents(knex)
   const community = new Community(knex)
   const extractor = new PDFExtractor()
 
+  logger.info(`Uploading new document on community Id ${request.query.communityId}`)
   response.writeHead(200, {
     'Content-Type': 'text/plain; charset=us-ascii',
     'X-Content-Type-Options': 'nosniff'
   });
 
   if(request.file) {
+    logger.info(`Checking if the file uploaded on server`)
     documents.checkIfFileExists(request.fileName[0])
     .then(async (res) => {
       if(res == 1) {
         if(fs.existsSync(request.filePath + '/' + request.fileFullName)){
+          logger.info(`File uploaded seuccessfully, splitting the document into chunks`)
           let docs = []
           if(request.file.mimetype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-            response.write('1-File uploaded successfully, Analysing the document...$')
-            docs = await documents.createDocumentFromDocx(path.join(request.filePath, request.fileFullName))
+            response.write('1&%&File uploaded successfully, Analysing the document...$')
+            docs = await documents.createDocumentFromDocx(path.join(request.filePath, request.fileFullName), request.fileName[0], request.file.originalname)
           } else if(request.file.mimetype == "application/pdf") {
-            response.write('1-File uploaded successfully, Extracting the data from PDF...$')
-            const textURL = await extractor.convertPDFToText(path.join(request.filePath, request.fileFullName), request.decoded.userId, request.fileName[0])
-            docs = await documents.createDocumentFromText(textURL)
-            response.write('1-Data extraction successfull, Analysing the document...$')
+            docs = await documents.createDocumentFromPDF(path.join(request.filePath, request.fileFullName), request.fileName[0], request.file.originalname)
+
+            if(docs.length > 0) {
+              response.write('1&%&File uploaded successfully, Extracting the data from PDF...$')
+            } else {
+              response.write('1&%&File uploaded successfully, Extracting the data from PDF...$')
+              const textURL = await extractor.convertPDFToText(path.join(request.filePath, request.fileFullName), request.decoded.userId, request.fileName[0])
+              docs = await documents.createDocumentFromText(textURL, request.fileName[0], request.file.originalname)
+              response.write('1&%&Data extraction successfull, Analysing the document...$')
+            }
           } else if(request.file.mimetype == "text/plain") {
-            response.write('1-File uploaded successfully, Analysing the document...$')
-            docs = await documents.createDocumentFromText(path.join(request.filePath, request.fileFullName))
+            response.write('1&%&File uploaded successfully, Analysing the document...$')
+            docs = await documents.createDocumentFromText(path.join(request.filePath, request.fileFullName), request.fileName[0], request.file.originalname)
           } else if(request.file.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
-            response.write('1-File uploaded successfully, Analysing the document...$')
+            response.write('1&%&File uploaded successfully, Analysing the document...$')
             let isCsvFileCreated = await documents.createTempCSVFileForXLSXFile(request.filePath, request.fileName, 'xlsx')
             if(isCsvFileCreated == 1) {
-              docs = await documents.createDocumentFromCSV(path.join(path.resolve(`${process.env.TMP_CSV_PATH}`), `${request.fileName[0]}.csv`))
+              docs = await documents.createDocumentFromCSV(path.join(path.resolve(`${process.env.TMP_CSV_PATH}`), `${request.fileName[0]}.csv`), request.fileName[0], request.file.originalname)
             }
           } else if(request.file.mimetype == "application/vnd.ms-excel") {
-            response.write('1-File uploaded successfully, Analysing the document...$')
+            response.write('1&%&File uploaded successfully, Analysing the document...$')
             let isCsvFileCreated = await documents.createTempCSVFileForXLSXFile(request.filePath, request.fileName, 'xls')
             if(isCsvFileCreated == 1) {
-              docs = await documents.createDocumentFromCSV(path.join(path.resolve(`${process.env.TMP_CSV_PATH}`), `${request.fileName[0]}.csv`))
+              docs = await documents.createDocumentFromCSV(path.join(path.resolve(`${process.env.TMP_CSV_PATH}`), `${request.fileName[0]}.csv`), request.fileName[0], request.file.originalname)
             }
           } else if(request.file.mimetype == "application/msword") {
-            response.write('1-File uploaded successfully, Analysing the document...$')
+            response.write('1&%&File uploaded successfully, Analysing the document...$')
             const textFilePath = await documents.extractTextFromDocAndCreateTextFile(path.join(request.filePath, request.fileFullName), request.decoded.userId, request.fileName[0])
-            docs = await documents.createDocumentFromText(textFilePath)
+            docs = await documents.createDocumentFromText(textFilePath, request.fileName[0], request.file.originalname)
           } else if(request.file.mimetype == "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
-            response.write('1-File uploaded successfully, Analysing the document...$')
+            response.write('1&%&File uploaded successfully, Analysing the document...$')
             const textFilePath = await documents.extractTextFromPPTXAndCreateTextFile(path.join(request.filePath, request.fileFullName), request.decoded.userId, request.fileName[0])
-            docs = await documents.createDocumentFromText(textFilePath)
+            docs = await documents.createDocumentFromText(textFilePath, request.fileName[0], request.file.originalname)
           } else {
-            response.write('0-File upload failed, Invalid file type$')
+            response.write('0&%&File upload failed, Invalid file type$')
             response.end()
           }
 
           if(docs.length > 0) {
+            logger.info(`Document split successfully`)
+            logger.info(`Creating and storing embeddings on vector database`)
             community.getCommunityAlias(request.query.communityId)
             .then((alias) => {
-              console.log(docs)
               documents.createAndStoreEmbeddingsOnIndex(docs, alias)
               .then((res) => {
                 documents.checkIfFileExists(request.fileName[0])
@@ -456,68 +541,70 @@ app.post('/upload-document', auth.verifyToken, documentUpload.single('file'), as
                       ) {
                         documents.deleteTempTextFile(request.decoded.userId)
                       }
-                      // return response.status(201)
-                      //     .send({ success: true, message: request.t('fileUploadSuccess') });
                       
-                      response.write('1-File uploaded successfully, File analyzed successfully$')
+                      logger.info(`Embeddings created and stored on vector database`)
+                      response.write('1&%&File uploaded successfully, File analyzed successfully$')
                       response.end()
                     } else {
-                      // return response.status(201)
-                      //     .send({ success: false, message: request.t('fileUploadFailedAnalyzeSuccess') });
-                      response.write('0-File upload failed, File analyzed successfully$')
+                      logger.warn(`Failed to create embeddings`)
+                      response.write('0&%&File upload failed, File analyzed successfully$')
                       response.end()
                     }
                   } else {
-                    // return response.status(201)
-                    //       .send({ success: false, message: request.t('fileUploadFailedAnalyzeSuccess') });
-                    response.write('0-File upload failed, File analyzed successfully$')
+                    logger.warn(`Failed to create embeddings`)
+                    response.write('0&%&File upload failed, File analyzed successfully$')
                     response.end()
                   }
                 })
                 .catch((err) => {
                   console.log(err)
-                  // return response.status(201)
-                  //   .send({ success: false, message: request.t('fileUploadFailedAnalyzeSuccess') });
-                  response.write('0-File upload failed, File analyzed successfully$')
+                  logger.warn(`Failed to create embeddings`)
+                  logger.error(err)
+                  response.write('0&%&File upload failed, File analyzed successfully$')
                   response.end()
                 })
               })
               .catch((err) => {
                 console.log(err)
-                // return response.status(201)
-                //     .send({ success: false, message: request.t('fileUploadSuccessAnalyzeFailed') });
-                response.write('0-File uploaded successfully, Failed to analyze the file$')
+                logger.warn(`Failed to create embeddings`)
+                logger.error(err)
+                response.write('0&%&File uploaded successfully, Failed to analyze the file$')
                 response.end()
               })
             })
             .catch((err) => {
               console.log(err)
-              // return response.status(201)
-              //       .send({ success: false, message: request.t('fileUploadSuccessAnalyzeFailed') });
-              response.write('0-File uploaded successfully, Failed to analyze the file$')
+              logger.warn(`Failed to create embeddings`)
+              logger.error(err)
+              response.write('0&%&File uploaded successfully, Failed to analyze the file$')
               response.end()
             })
           } else {
-            response.write('0-File upload failed, Failed to analyze the file$')
+            logger.warn(`File upload failed`)
+            response.write('0&%&File upload failed, Failed to analyze the file$')
             response.end()
           }
         } else {
-          // return response.status(201)
-          //     .send({ success: false, message: request.t('fileUploadFailedAnalyzeSuccess') });
-          response.write('0-File upload failed, Failed to analyze the file$')
+          logger.warn(`File upload failed`)
+          response.write('0&%&File upload failed, Failed to analyze the file$')
           response.end()
         }
       } else {
-        response.write('0-File upload failed, Failed to analyze the file$')
+        logger.warn(`File upload failed, unable to find the file on server`)
+        response.write('0&%&File upload failed, Failed to analyze the file$')
         response.end()
       }
     })
     .catch((err) => {
       console.log(err)
+      logger.warn(`File upload failed, unable to find the file on server`)
+      logger.error(err)
+      response.write('0&%&File upload failed, Failed to analyze the file$')
+      response.end()
     })
   }
 })
 
 app.listen(5050, () => {
-  console.log('app is listening on port 5050');
+    console.log('app is listening on port 5050');
 });

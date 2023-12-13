@@ -2,7 +2,10 @@ const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
 const Users = require('../services/Users');
 const Chat = require('../services/Chat');
+const Documents = require('../services/Documents')
 const user = require('../routes/user');
+const winston = require('winston');
+const { combine, timestamp, json } = winston.format;
 
 dotenv.config();
 
@@ -19,12 +22,24 @@ const knex = require('knex')({
     }
 });
 
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: combine(timestamp(), json()),
+    transports: [
+      new winston.transports.File({
+        filename: process.env.LOG_FILE_PATH,
+      }),
+    ],
+});
+
 const Auth = {
     
     verifyToken(request, response, next) {
+        logger.info(`Extracting auth token from request`)
         let bearerToken = request.headers['authorization'];
 
         if (!bearerToken) {
+            logger.warn(`No auth token present in the request`)
             return response.status(401)
             .send({ message: 'No token supplied' });
         }
@@ -32,6 +47,7 @@ const Auth = {
         let _bearerToken = bearerToken.split(' ')
         let token = _bearerToken[1]
         
+        logger.info(`Verifying auth token: ${token}`)
         jwt.verify(token, secret, (err, decoded)=>{
             console.log(token, err, decoded, 'token');
         });
@@ -39,9 +55,12 @@ const Auth = {
         jwt.verify(token, secret, (err, decoded) => {
             if (err) {
                 console.log(err)
+                logger.warn('Invalid token')
+                logger.error(err)
                 return response.status(401)
                     .send({ message: 'Token Invalid' });
             }
+            logger.info(`Token valid`)
             request.decoded = decoded;
             return next();
         });
@@ -125,6 +144,30 @@ const Auth = {
         .catch((err) => {
             return response.status(401)
                 .send({ message: 'Access Denied' });
+        })
+    },
+
+    checkForDuplicateFile(request, response, next) {
+        const documents = new Documents(knex)
+
+        logger.info(`Check if file is duplicate`)
+        documents.checkIfFileNameExistUnderParentId(
+            request.query.fileName,
+            request.query.parentId,
+            request.query.communityId
+        )
+        .then((res) => {
+            if(res == 1) {
+                logger.warn(`Upload failed due to duplicate file`)
+                response.writeHead(200, {
+                    'Content-Type': 'text/plain; charset=us-ascii',
+                    'X-Content-Type-Options': 'nosniff'
+                });
+                response.write(`0&%&File ${request.query.fileName} already exists under current folder$`)
+                response.end()
+            } else {
+                return next()
+            }
         })
     }
 };

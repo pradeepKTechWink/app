@@ -1,3 +1,5 @@
+const SuperAdmin = require('./SuperAdmin')
+
 class Chat {
     constructor(dbConnection) {
         this.dbConnection = dbConnection
@@ -38,13 +40,14 @@ class Chat {
         })
     }
 
-    addMessagesToTheChatHistory(chatId, message, messageType, parent) {
+    addMessagesToTheChatHistory(chatId, message, messageType, parent, source) {
         return new Promise((resolve, reject) => {
             const dateTime = new Date()
             this.dbConnection("chat_messages")
             .insert({
                 chatId,
                 message,
+                source,
                 role: messageType,
                 parent,
                 created: dateTime
@@ -60,7 +63,6 @@ class Chat {
 
     async addAIReplyToUserQueries(userQueries, aiQueries) {
         let finalResults = []
-        console.log(userQueries)
         for (const userQuery of userQueries) {
             let temp = {}
             temp.userQuery = userQuery.message
@@ -91,16 +93,38 @@ class Chat {
         return userQueries
     }
 
+    getNoOfPastMessageToBeAdded() {
+        return new Promise((resolve, reject) => {
+            const superAdmin = new SuperAdmin(this.dbConnection)
+            superAdmin.getSettings('conversationNumberToPass')
+            .then((setting) => {
+                resolve(setting[0]['meta_value'])
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
     getChatMessagesForHistory(chatId) {
         return new Promise((resolve, reject) => {
             this.dbConnection("chat_messages")
             .select("*")
             .where({ chatId })
             .then(async (chatMessagesList) => {
-                const userQueries = await this.extractUserQueries(chatMessagesList)
-                const aiAnswers = await this.extractAIAnswers(chatMessagesList)
-                const chatHistories = await this.addAIReplyToUserQueries(userQueries, aiAnswers)
-                resolve(chatHistories)
+                this.getNoOfPastMessageToBeAdded()
+                .then(async (noOfPastMessageToAdd) => {
+                    const listLastIndex = chatMessagesList.length - 1
+                    const filteredConversation = chatMessagesList.slice(listLastIndex - parseInt(noOfPastMessageToAdd), listLastIndex + 1)
+                    const userQueries = await this.extractUserQueries(filteredConversation)
+                    const aiAnswers = await this.extractAIAnswers(filteredConversation)
+                    const chatHistories = await this.addAIReplyToUserQueries(userQueries, aiAnswers)
+                    resolve(chatHistories)
+                })
+                .catch((err) => {
+
+                })
             })
             .catch((err) => {
                 console.log(err)
@@ -116,6 +140,30 @@ class Chat {
             .where({ chatId })
             .then((messages) => {
                 resolve(messages)
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    getChatMessagesForAIQuery(chatId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("chat_messages")
+            .select("*")
+            .where({ chatId })
+            .then((messages) => {
+                this.getNoOfPastMessageToBeAdded()
+                .then((noOfPastMessageToAdd) => {
+                    const listLastIndex = messages.length - 1
+                    const filteredMessages = messages.slice(listLastIndex - parseInt(noOfPastMessageToAdd), listLastIndex)
+                    resolve(filteredMessages)
+                })
+                .catch((err) => {
+                    console.log(err)
+                    reject(err)
+                })
             })
             .catch((err) => {
                 console.log(err)
