@@ -59,20 +59,47 @@ class Documents {
         return path.resolve(_path)
     }
 
+    // getPredecessorFolders(folderId) {
+    //     return new Promise(async(resolve, reject) => {
+    //         try {
+    //             let nextParentId = folderId;
+    //             let folderTrace = [];
+    //             while(true) {
+    //                 if(!nextParentId) {
+    //                     resolve(folderTrace.reverse())
+    //                     break
+    //                 }
+    //                 const _data = await this.dbConnection('documents').select('*').where({ id: nextParentId })
+    //                 folderTrace.push(_data[0])
+    //                 nextParentId = _data[0]["parentId"]
+    //             }
+    //         } catch (error) {
+    //             console.log(error)
+    //             reject(error)
+    //         }
+    //     })
+    // }
+
     getPredecessorFolders(folderId) {
         return new Promise(async(resolve, reject) => {
             try {
                 let nextParentId = folderId;
                 let folderTrace = [];
-                while(true) {
-                    if(!nextParentId) {
-                        resolve(folderTrace.reverse())
-                        break
+                    
+                while (nextParentId) {
+                    const _data = await this.dbConnection('documents')
+                                .select('*')
+                                .where({ id: nextParentId });
+                
+                    if (_data.length === 0) {
+                        break;
                     }
-                    const _data = await this.dbConnection('documents').select('*').where({ id: nextParentId })
-                    folderTrace.push(_data[0])
-                    nextParentId = _data[0]["parentId"]
+                
+                    folderTrace.push(_data[0]);
+                    nextParentId = _data[0]["parentId"];
                 }
+            
+                resolve(folderTrace.reverse());
             } catch (error) {
                 console.log(error)
                 reject(error)
