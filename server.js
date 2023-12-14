@@ -124,6 +124,7 @@ app.use(chatRoute());
 app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), function (request, response) {
   const user = new Users(knex)
 
+  logger.debug(JSON.stringify( request ))
   logger.info(`Updating profile for user Id ${request.body.userId}`)
   if(request.file) {
       logger.info(`Update request include new profile picture`)
@@ -152,11 +153,13 @@ app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), 
                   logger.info(`Updated user data fetched successfully`)
                   let userData = data
 
+                  logger.debug(JSON.stringify( {success: true, message: request.t('userProfileUpdateSuccess'), userData} ))
                   return response.status(200)
                       .send({success: true, message: request.t('userProfileUpdateSuccess'), userData});
               })
           } else {
               logger.warn(`Failed to fetch updated user details`)
+              logger.debug(JSON.stringify( {success: false, message: request.t('userProfileUpdateFailed')} ))
               return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
           }
@@ -165,6 +168,7 @@ app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), 
           console.log(err)
           logger.warn(`Profile updated failed for ${request.body.userId}`)
           logger.error(err)
+          logger.debug(JSON.stringify( {success: false, message: request.t('userProfileUpdateFailed')} ))
           return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
       })
@@ -186,11 +190,13 @@ app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), 
                 logger.info(`Updated user data fetched successfully`)
                 let userData = data
 
+                logger.debug(JSON.stringify( {success: true, message: request.t('userProfileUpdateSuccess'), userData} ))
                 return response.status(200)
                     .send({success: true, message: request.t('userProfileUpdateSuccess'), userData});
             })
           } else {
               logger.warn(`Failed to fetch updated user details`)
+              logger.debug(JSON.stringify( {success: false, message: request.t('userProfileUpdateFailed')} ))
               return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
           }
@@ -199,6 +205,7 @@ app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), 
           console.log(err)
           logger.warn(`Profile updated failed for ${request.body.userId}`)
           logger.error(err)
+          logger.debug(JSON.stringify( {success: false, message: request.t('userProfileUpdateFailed')} ))
           return response.status(200)
                       .send({success: false, message: request.t('userProfileUpdateFailed')});
       })
@@ -209,6 +216,7 @@ app.post('/profile/update', auth.verifyToken, userAvatarUpload.single('image'), 
 app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatarUpload.single('image'), function (request, response) {
   const user = new Users(knex)
 
+  logger.debug(JSON.stringify( request ))
   logger.info(`Updating profile for user Id ${request.body.userId} by admin`)
   if(request.file) {
       logger.info(`Update request include new profile picture`)
@@ -248,6 +256,7 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
                     let userData = data
                     userData = {...userData, role: request.body.role}
 
+                    logger.debug(JSON.stringify( {success: true, message: request.t('adminAserProfileUpdateSuccess'), userData} ))
                     return response.status(200)
                         .send({success: true, message: request.t('adminAserProfileUpdateSuccess'), userData});
                 })
@@ -255,11 +264,13 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
                   console.log(err)
                   logger.warn(`Failed to fetch updated user details`)
                   logger.error(err)
+                  logger.debug(JSON.stringify( {success: true, message: request.t('adminAserProfileUpdateSuccessFetchFailed'), userData} ))
                   return response.status(200)
                         .send({success: true, message: request.t('adminAserProfileUpdateSuccessFetchFailed'), userData});
                 })
               } else {
                 logger.warn(`Failed to update role by admin`)
+                logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData} ))
                 return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
               }
@@ -268,11 +279,13 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
               console.log(err)
               logger.warn(`Failed to update role by admin`)
               logger.error(err)
+              logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData} ))
               return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
             })
           } else {
               logger.warn(`Profile update by admin failed`)
+              logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateFailed')} ))
               return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
           }
@@ -281,6 +294,7 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
           console.log(err)
           logger.warn(`Profile update by admin failed`)
           logger.error(err)
+          logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateFailed')} ))
           return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
       })
@@ -313,6 +327,7 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
                     let userData = data
                     userData = {...userData, role: request.body.role}
 
+                    logger.debug(JSON.stringify( {success: true, message: request.t('adminAserProfileUpdateSuccess'), userData} ))
                     return response.status(200)
                         .send({success: true, message: request.t('adminAserProfileUpdateSuccess'), userData});
                 })
@@ -320,11 +335,13 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
                   console.log(err)
                   logger.warn(`Failed to fetch updated user details`)
                   logger.error(err)
+                  logger.debug(JSON.stringify( {success: true, message: request.t('adminAserProfileUpdateSuccessFetchFailed'), userData} ))
                   return response.status(200)
                         .send({success: true, message: request.t('adminAserProfileUpdateSuccessFetchFailed'), userData});
                 })
               } else {
                 logger.warn(`Failed to update role by admin`)
+                logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData} ))
                 return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
               }
@@ -333,11 +350,13 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
               console.log(err)
               logger.warn(`Failed to update role by admin`)
               logger.error(err)
+              logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData} ))
               return response.status(200)
                   .send({success: false, message: request.t('adminAserProfileUpdateSuccessRoleFailed'), userData});
             })
           } else {
               logger.warn(`Profile update by admin failed`)
+              logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateFailed')} ))
               return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
           }
@@ -346,6 +365,7 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
           console.log(err)
           logger.warn(`Profile update by admin failed`)
           logger.error(err)
+          logger.debug(JSON.stringify( {success: false, message: request.t('adminAserProfileUpdateFailed')} ))
           return response.status(200)
                       .send({success: false, message: request.t('adminAserProfileUpdateFailed')});
       })
@@ -355,6 +375,7 @@ app.post('/admin/update-profile', auth.verifyToken, auth.adminAccess, userAvatar
 app.post('/company/update-profile', auth.verifyToken, auth.adminAccess, companyLogoUpload.single('image'), function (request, response) {
   const user = new Users(knex)
 
+  logger.debug(JSON.stringify( request ))
   logger.info(`Updating company profile for id ${request.body.companyId}`)
   if(request.file) {
       logger.info(`Update request contain company profile picture`)
@@ -392,11 +413,13 @@ app.post('/company/update-profile', auth.verifyToken, auth.adminAccess, companyL
                   logger.info(`Updated company details fetched successfully`)
                   let companyData = data
 
+                  logger.debug(JSON.stringify( {success: true, message: request.t('companyProfileUpdateSuccess'), companyData} ))
                   return response.status(200)
                       .send({success: true, message: request.t('companyProfileUpdateSuccess'), companyData});
               })
           } else {
               logger.warn(`Company profile update failed `)
+              logger.debug(JSON.stringify( {success: false, message: request.t('companyProfileUpdateFailed')} ))
               return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
           }
@@ -405,6 +428,7 @@ app.post('/company/update-profile', auth.verifyToken, auth.adminAccess, companyL
           logger.warn(`Company profile update failed `)
           logger.error(err)
           console.log(err)
+          logger.debug(JSON.stringify( {success: false, message: request.t('companyProfileUpdateFailed')} ))
           return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
       })
@@ -435,11 +459,13 @@ app.post('/company/update-profile', auth.verifyToken, auth.adminAccess, companyL
                 logger.info(`Updated company details fetched successfully`)
                 let companyData = data
 
+                logger.debug(JSON.stringify( {success: true, message: request.t('companyProfileUpdateSuccess'), companyData} ))
                 return response.status(200)
                     .send({success: true, message: request.t('companyProfileUpdateSuccess'), companyData});
             })
           } else {
               logger.warn(`Company profile update failed `)
+              logger.debug(JSON.stringify( {success: false, message: request.t('companyProfileUpdateFailed')} ))
               return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
           }
@@ -448,6 +474,7 @@ app.post('/company/update-profile', auth.verifyToken, auth.adminAccess, companyL
           console.log(err)
           logger.warn(`Company profile update failed `)
           logger.error(err)
+          logger.debug(JSON.stringify( {success: false, message: request.t('companyProfileUpdateFailed')} ))
           return response.status(200)
                       .send({success: false, message: request.t('companyProfileUpdateFailed')});
       })
@@ -459,6 +486,7 @@ app.post('/file-manager/upload-file', auth.verifyToken, auth.checkForDuplicateFi
   const community = new Community(knex)
   const extractor = new PDFExtractor()
 
+  logger.debug(JSON.stringify( request ))
   logger.info(`Uploading new document on community Id ${request.query.communityId}`)
   response.writeHead(200, {
     'Content-Type': 'text/plain; charset=us-ascii',

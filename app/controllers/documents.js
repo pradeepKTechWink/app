@@ -34,6 +34,7 @@ class DocumentController {
     static createNewFolder(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Creating new folder for community ${request.body.communityId}`)
       documents.createFolder(
         request.body.folderName, 
@@ -48,12 +49,14 @@ class DocumentController {
         documents.getChildFoldersAndFiles(request.body.parentId, request.body.communityId)
         .then((res) => {
           logger.info(`Fetched updated files and folders for community ${request.body.communityId}`)
+          logger.debug(JSON.stringify( { success: true, message: request.t('folderCreationSuccess'), filesAndFolders: res } ))
           return response.status(201)
           .send({ success: true, message: request.t('folderCreationSuccess'), filesAndFolders: res });
         })
         .catch((err) => {
           logger.warn(`Failed to fetch the updated files and folders for community ${request.body.communityId}`)
           logger.error(err)
+          logger.debug(JSON.stringify( { success: true, message: request.t('folderCreationSuccessFetchFailed') } ))
           return response.status(201)
           .send({ success: true, message: request.t('folderCreationSuccessFetchFailed') });
         })
@@ -61,6 +64,7 @@ class DocumentController {
       .catch((err) => {
         logger.warn(`Folder creation failed for community ${request.body.communityId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('folderCreationFailed') } ))
         return response.status(201)
           .send({ success: false, message: request.t('folderCreationFailed') });
       })
@@ -69,15 +73,19 @@ class DocumentController {
     static getRootFoldersForCommunity(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Fetching root folders for community ID ${request.body.communityId}`)
       documents.getRootFolders(request.body.communityId)
       .then((_list) => {
         logger.info(`Root folders fetched successfully for community ID ${request.body.communityId}`)
+        logger.debug(JSON.stringify( { success: true, filesAndFolders: _list  } ))
         return response.status(201)
             .send({ success: true, filesAndFolders: _list  });
       })
       .catch((err) => {
         logger.warn(`Failed to fetch root folders for community ${request.body.communityId}`)
+        logger.error(err)
+        logger.debug(JSON.stringify( { success: false } ))
         return response.status(201)
             .send({ success: false });
       })
@@ -86,18 +94,21 @@ class DocumentController {
     static getChildFoldersAndFiles(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Fetching child folders and files for the folders ID ${request.body.parentId}`)
       documents.getChildFoldersAndFiles(request.body.parentId, request.body.communityId)
       .then((res) => {
         documents.getPredecessorFolders(request.body.parentId)
         .then((predecessFolders) => {
           logger.info(`Files and folders fetched for folder Id ${request.body.parentId}`)
+          logger.debug(JSON.stringify( { success: true, filesAndFolders: res, predecessFolders } ))
           return response.status(201)
             .send({ success: true, filesAndFolders: res, predecessFolders });
         })
         .catch((err) => {
           logger.info(`Failed to fetch files and folders for folder Id ${request.body.parentId}`)
           logger.error(err)
+          logger.debug(JSON.stringify( { success: true, filesAndFolders: res, predecessFolders: [] } ))
           return response.status(201)
             .send({ success: true, filesAndFolders: res, predecessFolders: [] });
         })
@@ -105,6 +116,7 @@ class DocumentController {
       .catch((err) => {
         logger.info(`Failed to fetch files and folders for folder Id ${request.body.parentId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false } ))
         return response.status(201)
             .send({ success: false });
       })
@@ -113,6 +125,7 @@ class DocumentController {
     static getPreviousFilesAndFolders(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Fetching child folders and files for the folders ID ${request.body.folderId}`)
       documents.getParentId(request.body.folderId)
       .then((parentId) => {
@@ -121,12 +134,14 @@ class DocumentController {
           documents.getChildFoldersAndFiles(_parentId2, request.body.communityId)
           .then((res) => {
             logger.info(`Files and folders fetched for folder Id ${request.body.folderId}`)
+            logger.debug(JSON.stringify( { success: true, filesAndFolders: res  } ))
             return response.status(201)
             .send({ success: true, filesAndFolders: res  });
           })
           .catch((err) => {
             logger.info(`Failed to fetch files and folders for folder Id ${request.body.folderId}`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false } ))
             return response.status(201)
             .send({ success: false });
           })
@@ -137,6 +152,7 @@ class DocumentController {
     static deleteFolder(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Deleting folder Id ${request.body.folderId}`)
       documents.deleteFolder(request.body.folderId, request.body.communityId)
       .then((res) => {
@@ -147,12 +163,14 @@ class DocumentController {
             documents.searchFilesAndFolders(request.body.searchString, request.body.communityId)
             .then((searchResult) => {
               logger.info(`Updated files and folders fetched successfully`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('folderDeletionSuccess'), filesAndFolders: searchResult, predecessFolders: [] } ))
               return response.status(200)
                       .send({ success: true, message: request.t('folderDeletionSuccess'), filesAndFolders: searchResult, predecessFolders: [] });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the updated files and folders`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false,  message: request.t('folderDeletionFailed') } ))
               return response.status(201)
                       .send({ success: false,  message: request.t('folderDeletionFailed') });
             })
@@ -160,18 +178,21 @@ class DocumentController {
             documents.getChildFoldersAndFiles(request.body.parentId, request.body.communityId)
             .then((res) => {
               logger.info(`Updated files and folders fetched successfully`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('folderDeletionSuccess'), filesAndFolders: res  } ))
               return response.status(201)
                   .send({ success: true, message: request.t('folderDeletionSuccess'), filesAndFolders: res  });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the updated files and folders`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('folderDeletionFailed') } ))
               return response.status(201)
                   .send({ success: false, message: request.t('folderDeletionFailed') });
             })
           }
         } else {
           logger.warn(`Failed to delete the folder Id ${request.body.folderId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('folderDeletionFailed') } ))
           return response.status(201)
                 .send({ success: false, message: request.t('folderDeletionFailed') });
         }
@@ -179,6 +200,7 @@ class DocumentController {
       .catch((err) => {
         logger.warn(`Failed to delete the folder Id ${request.body.folderId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('folderDeletionFailed') } ))
         return response.status(201)
                 .send({ success: false, message: request.t('folderDeletionFailed') });
       })
@@ -186,6 +208,7 @@ class DocumentController {
 
     static deleFile(request, response) {
       const documents = new Documents(knex)
+      logger.debug(JSON.stringify(  ))
       logger.info(`Deleting file Id ${request.body.fileId}`)
       documents.deleteFile(request.body.fileId, request.body.communityId)
       .then((res) => {
@@ -196,12 +219,14 @@ class DocumentController {
             documents.searchFilesAndFolders(request.body.searchString, request.body.communityId)
             .then((searchResult) => {
               logger.info(`Updated files and folders fetched successfully`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('fileDeletionSuccess'), filesAndFolders: searchResult, predecessFolders: [] } ))
               return response.status(200)
                       .send({ success: true, message: request.t('fileDeletionSuccess'), filesAndFolders: searchResult, predecessFolders: [] });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the updated files and folders`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false,  message: request.t('fileDeletionFailed') } ))
               return response.status(201)
                       .send({ success: false,  message: request.t('fileDeletionFailed') });
             })
@@ -209,18 +234,21 @@ class DocumentController {
             documents.getChildFoldersAndFiles(request.body.parentId, request.body.communityId)
             .then((res) => {
               logger.info(`Updated files and folders fetched successfully`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('fileDeletionSuccess'), filesAndFolders: res  } ))
               return response.status(201)
                   .send({ success: true, message: request.t('fileDeletionSuccess'), filesAndFolders: res  });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the updated files and folders`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('fileDeletionFailed') } ))
               return response.status(201)
                   .send({ success: false, message: request.t('fileDeletionFailed') });
             })
           }
         } else {
           logger.warn(`Failed to delete the file Id ${request.body.fileId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('fileDeletionFailed') } ))
           return response.status(201)
                 .send({ success: false, message: request.t('fileDeletionFailed') });
         }
@@ -228,6 +256,7 @@ class DocumentController {
       .catch((err) => {
         logger.warn(`Failed to delete the file Id ${request.body.fileId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('fileDeletionFailed') } ))
         return response.status(201)
                 .send({ success: false, message: request.t('fileDeletionFailed') });
       })
@@ -236,16 +265,19 @@ class DocumentController {
     static getFolderData(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Fetching folder data for Id ${request.body.folderId}`)
       documents.getFolderData(request.body.folderId)
       .then((folderData) => {
         logger.info(`Folder data fetched successfully for ${request.body.folderId}`)
+        logger.debug(JSON.stringify( { success: true, folderData } ))
         return response.status(201)
           .send({ success: true, folderData });
       })
       .catch((err) => {
         logger.warn(`Failed to fetch folder data for Id ${request.body.folderId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false } ))
         return response.status(201)
                 .send({ success: false });
       })
@@ -254,6 +286,7 @@ class DocumentController {
     static updateFolderData(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Updating folder data for Id ${request.body.folderId}`)
       documents.updateFolder(request.body.folderId, request.body.folderName, request.body.folderDescription)
       .then((res) => {
@@ -264,6 +297,7 @@ class DocumentController {
             documents.searchFilesAndFolders(request.body.searchString, request.body.communityId)
             .then((searchResult) => {
               logger.info(`Updated folder lists fetched successfully`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('folderUpdateSuccess'), filesAndFolders: searchResult, predecessFolders: [] } ))
               return response.status(200)
                       .send({ success: true, message: request.t('folderUpdateSuccess'), filesAndFolders: searchResult, predecessFolders: [] });
             })
@@ -271,6 +305,7 @@ class DocumentController {
               console.log(err)
               logger.warn(`Failed to fetch updated folder list`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false,  message: request.t('folderUpdateSuccessFetchFailed') } ))
               return response.status(201)
                       .send({ success: false,  message: request.t('folderUpdateSuccessFetchFailed') });
             })
@@ -279,18 +314,21 @@ class DocumentController {
             documents.getChildFoldersAndFiles(request.body.parentId, request.body.communityId)
             .then((res) => {
               logger.info(`Updated folder lists fetched successfully`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('folderUpdateSuccess'), filesAndFolders: res  } ))
               return response.status(201)
                   .send({ success: true, message: request.t('folderUpdateSuccess'), filesAndFolders: res  });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch updated folder list`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('folderUpdateSuccessFetchFailed') } ))
               return response.status(201)
                   .send({ success: false, message: request.t('folderUpdateSuccessFetchFailed') });
             })
           }
         } else {
           logger.warn(`Folder update failed for Id ${request.body.folderId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('folderUpdateFailed') } ))
           return response.status(201)
                 .send({ success: false, message: request.t('folderUpdateFailed') });
         }
@@ -300,6 +338,7 @@ class DocumentController {
     static getFile(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Fetching buffer for file Id ${request.body.fileId}`)
       const mimeTypeMap = {
         'docx' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -316,6 +355,7 @@ class DocumentController {
       .then((res) => {
         if(res == 'file-not-found') {
           logger.warn(`File ${request.body.fileId} does not exist`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('fileNotFound') } ))
           return response.status(201)
                 .send({ success: false, message: request.t('fileNotFound') });
         } else {
@@ -334,6 +374,7 @@ class DocumentController {
       .catch((err) => {
         logger.warn(`Failed to fetch buffer file Id ${request.body.fileId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('documentFetchFailed') } ))
         return response.status(201)
                 .send({ success: false, message: request.t('documentFetchFailed') });
       })
@@ -342,16 +383,19 @@ class DocumentController {
     static searchFilesAndFolder(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Searching files and folders for search string ${request.body.searchString} on community Id ${request.body.communityId}`)
       documents.searchFilesAndFolders(request.body.searchString, request.body.communityId)
       .then((searchResult) => {
         logger.info(`Matching data fetched successfully for serahc string ${request.body.searchString}`)
+        logger.debug(JSON.stringify( { success: true, filesAndFolders: searchResult, predecessFolders: [] } ))
         return response.status(200)
                 .send({ success: true, filesAndFolders: searchResult, predecessFolders: [] });
       })
       .catch((err) => {
         logger.warn(`Failed to fetch matching data for search string ${request.body.searchString}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false } ))
         return response.status(201)
                 .send({ success: false });
       })
@@ -369,12 +413,14 @@ class DocumentController {
         users.getCompanyUserCount(request.body.companyId)
         .then((userCount) => {
           logger.info(`User count data fetched for Id ${request.body.companyId}`)
+          logger.debug(JSON.stringify( { success: true, noOfQueries: 50, fileStorageSize: storageOccupationData, noOfUsers: userCount } ))
           return response.status(200)
                 .send({ success: true, noOfQueries: 50, fileStorageSize: storageOccupationData, noOfUsers: userCount });
         })
         .catch((err) => {
           logger.warn(`Failed to fetch user count data for Id ${request.body.companyId}`)
           logger.error(err)
+          logger.debug(JSON.stringify( { success: false } ))
           return response.status(201)
                 .send({ success: false });
         })
@@ -383,6 +429,7 @@ class DocumentController {
         console.log(err)
         logger.warn(`Failed to fetch storage data for Id ${request.body.companyId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false } ))
         return response.status(201)
               .send({ success: false });
       })
@@ -392,6 +439,7 @@ class DocumentController {
       const documents = new Documents(knex)
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Creating new document with a file name ${request.body.fileName}`)
       response.writeHead(200, {
         'Content-Type': 'text/plain; charset=us-ascii',
@@ -519,6 +567,7 @@ class DocumentController {
       const documents = new Documents(knex)
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify(request))
       logger.info(`Updating ${request.body.fileName}.html file`)
       response.writeHead(200, {
         'Content-Type': 'text/plain; charset=us-ascii',
@@ -790,12 +839,14 @@ class DocumentController {
     static changeFileName(request, response) {
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Changing file name for ${request.body.fileId}`)
       logger.info(`Checking if the new name is same as the old name`)
       documents.isFileNameSame(`${request.body.fileName}.html`, request.body.fileId)
       .then((isSameName) => {
         if(isSameName == 1) {
           logger.warn(`New name ${request.body.fileName}.html is same as the old name.`)
+          logger.debug(JSON.stringify( { success: false, message: "Old filename is same as new filename" } ))
           return response.status(200)
             .send({ success: false, message: "Old filename is same as new filename" });
         } else {
@@ -808,6 +859,7 @@ class DocumentController {
           .then((res) => {
             if(res == 1) {
               logger.warn(`${request.body.fileName}.html already exists under the parent`)
+              logger.debug(JSON.stringify( { success: false, message: `${request.body.fileName}.html already exist under current folder` } ))
               return response.status(200)
                 .send({ success: false, message: `${request.body.fileName}.html already exist under current folder` });
             } else {
@@ -818,10 +870,12 @@ class DocumentController {
                 console.log('Response', res)
                 if(res == 1) {
                   logger.info(`Filename updated successfully`)
+                  logger.debug(JSON.stringify( { success: true, message: "Filename updated successfully" } ))
                   return response.status(200)
                     .send({ success: true, message: "Filename updated successfully" });
                 } else {
                   logger.warn(`Failed to update the filename`)
+                  logger.debug(JSON.stringify( { success: false, message: "Failed to update the filename()" } ))
                   return response.status(200)
                     .send({ success: false, message: "Failed to update the filename()" });
                 }
@@ -830,6 +884,7 @@ class DocumentController {
                 console.log(err)
                 logger.warn(`Failed to update the filename`)
                 logger.error(err)
+                logger.debug(JSON.stringify( { success: false, message: "Failed to update the filename" } ))
                 return response.status(200)
                     .send({ success: false, message: "Failed to update the filename" });
               })
@@ -839,6 +894,7 @@ class DocumentController {
             console.log(err)
             logger.warn(`Failed to update the filename`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false, message: "Failed to update the filename" } ))
             return response.status(200)
               .send({ success: false, message: "Failed to update the filename" });
           })
@@ -848,6 +904,7 @@ class DocumentController {
         console.log(err)
         logger.warn(`Failed to update the filename`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: "Failed to update the filename" } ))
         return response.status(200)
           .send({ success: false, message: "Failed to update the filename" });
       })

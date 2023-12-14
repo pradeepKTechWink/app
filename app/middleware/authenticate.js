@@ -55,8 +55,9 @@ const Auth = {
         jwt.verify(token, secret, (err, decoded) => {
             if (err) {
                 console.log(err)
-                logger.warn('Invalid token')
+                logger.warn('Invalid token or expired token')
                 logger.error(err)
+                logger.debug(JSON.stringify({ message: 'Token Invalid' }))
                 return response.status(401)
                     .send({ message: 'Token Invalid' });
             }
@@ -77,11 +78,14 @@ const Auth = {
             if(role == 1) {
                 return next()
             } else {
+                logger.debug(JSON.stringify( { message: 'Access Denied' } ))
                 return response.status(401)
                     .send({ message: 'Access Denied' });
             }
         })
         .catch((err) => {
+            logger.debug(JSON.stringify( { message: 'Access Denied' } ))
+            logger.error(err)
             return response.status(401)
                 .send({ message: 'Access Denied' });
         })
@@ -98,11 +102,13 @@ const Auth = {
             if(role == 1 || role == 2) {
                 return next()
             } else {
+                logger.debug(JSON.stringify( { message: 'Access Denied' } ))
                 return response.status(401)
                     .send({ message: 'Access Denied' });
             }
         })
         .catch((err) => {
+            logger.debug(JSON.stringify( { message: 'Access Denied' } ))
             return response.status(401)
                 .send({ message: 'Access Denied' });
         })
@@ -119,11 +125,13 @@ const Auth = {
             if(role && role == 1 || role == 2 || role == 3) {
                 return next()
             } else {
+                logger.debug(JSON.stringify( { message: 'Access Denied' } ))
                 return response.status(401)
                     .send({ message: 'Access Denied' });
             }
         })
         .catch((err) => {
+            logger.debug(JSON.stringify( { message: 'Access Denied' } ))
             return response.status(401)
                 .send({ message: 'Access Denied' });
         })
@@ -137,11 +145,13 @@ const Auth = {
             if(historyData.userId == request.decoded.userId) {
                 return next()
             } else {
+                logger.debug(JSON.stringify( { message: 'Access Denied' } ))
                 return response.status(401)
                     .send({ message: 'Access Denied' });
             }
         })
         .catch((err) => {
+            logger.debug(JSON.stringify( { message: 'Access Denied' } ))
             return response.status(401)
                 .send({ message: 'Access Denied' });
         })

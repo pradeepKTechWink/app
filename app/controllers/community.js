@@ -33,6 +33,7 @@ class CommunityController {
         const community = new Community(knex)
         const documents = new Documents(knex)
 
+        logger.debug(JSON.stringify( request ))
         logger.info(`Creating community for company Id ${request.body.companyId} by user ${request.body.creator}`)
         community.createCommunity(
             request.body.communityName,
@@ -66,6 +67,7 @@ class CommunityController {
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
                   logger.info(`Community list fetched for company ${request.body.companyId}`)
+                  logger.debug(JSON.stringify( { success: true, message: request.t('communityCreateSuccess'), communityList: newCommunityList, totalPageNum, noOfRecords, activeCommunities } ))
                   return response.status(201)
                   .send({ success: true, message: request.t('communityCreateSuccess'), communityList: newCommunityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
@@ -73,6 +75,7 @@ class CommunityController {
               .catch((err) => {
                 logger.warn(`Community created successfully, but failed to fetch the updated list`)
                 logger.error(err)
+                logger.debug(JSON.stringify( { success: false, message: request.t('communityCreateSuccessFetchFailed')  } ))
                 return response.status(201)
                     .send({ success: false, message: request.t('communityCreateSuccessFetchFailed')  });
               })
@@ -81,6 +84,7 @@ class CommunityController {
         .catch((err) => {
           logger.warn(`Failed to create a community for company ${request.body.companyId}`)
           logger.error(err)
+          logger.debug(JSON.stringify( { success: false, message: request.t('communityCreateFailed') } ))
           return response.status(201)
               .send({ success: false, message: request.t('communityCreateFailed') });
         })
@@ -89,21 +93,26 @@ class CommunityController {
     static checkIfAliasAlreadyTaken(request, response) {
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Checking if community ID ${request.body.alias} already exists.`)
       community.isAliasAlreadyExists(request.body.alias)
       .then((res) => {
         if(res == 0) {
           logger.info(`Community ID ${request.body.alias} does not exists`)
+          logger.debug(JSON.stringify( { success: true, exist: false  } ))
           return response.status(201)
                 .send({ success: true, exist: false  });
         } else {
           logger.info(`Community ID ${request.body.alias} already exists`)
+          logger.debug(JSON.stringify( { success: true, exist: true  } ))
           return response.status(201)
                 .send({ success: true, exist: true  });
         }
       })
       .catch((err) => {
         logger.warn(`Failed to check community status for ${request.body.alias}`)
+        logger.error(err)
+        logger.debug(JSON.stringify( { success: false } ))
         return response.status(201)
                 .send({ success: false });
       })
@@ -112,11 +121,13 @@ class CommunityController {
     static checkIfAliasAlreadyTakenForUpdate(request, response) {
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Checking if community ID ${request.body.alias} already exists.`)
       community.isReservedAliasByCommunity(request.body.alias, request.body.communityId)
       .then((res) => {
         if(res == 1) {
           logger.info(`Community ID ${request.body.alias} does not exists`)
+          logger.debug(JSON.stringify( { success: true, exist: false  } ))
           return response.status(201)
                     .send({ success: true, exist: false  });
         } else {
@@ -124,10 +135,12 @@ class CommunityController {
           .then((res) => {
             if(res == 0) {
               logger.info(`Community ID ${request.body.alias} does not exists`)
+              logger.debug(JSON.stringify( { success: true, exist: false  } ))
               return response.status(201)
                     .send({ success: true, exist: false  });
             } else {
               logger.info(`Community ID ${request.body.alias} already exists`)
+              logger.debug(JSON.stringify( { success: true, exist: true  } ))
               return response.status(201)
                     .send({ success: true, exist: true  });
             }
@@ -135,6 +148,7 @@ class CommunityController {
           .catch((err) => {
             logger.warn(`Failed to check community status for ${request.body.alias}`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false } ))
             return response.status(201)
                     .send({ success: false });
           })
@@ -145,6 +159,7 @@ class CommunityController {
     static getCommunityList(request, response) {
         const community = new Community(knex)
 
+        logger.debug(JSON.stringify( request ))
         logger.info(`Fetching community list for company ${request.body.companyId}`)
         if(request.body.searchString && request.body.searchString != '') {
           community.searchCommunity(
@@ -161,12 +176,14 @@ class CommunityController {
             .then((recordCounts) => {
               const {totalPageNum, noOfRecords} = recordCounts
               logger.info(`Community list fetched successfully for company ${request.body.companyId}`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('communityListFetchSuccess'), communityList, totalPageNum, noOfRecords  } ))
               return response.status(201)
                 .send({ success: true, message: request.t('communityListFetchSuccess'), communityList, totalPageNum, noOfRecords  });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityListFetchFailed')  } ))
               return response.status(201)
                 .send({ success: false, message: request.t('communityListFetchFailed')  });
             })
@@ -174,6 +191,7 @@ class CommunityController {
           .catch((err) => {
             logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false, message: request.t('communityListFetchFailed')  } ))
             return response.status(201)
                 .send({ success: false, message: request.t('communityListFetchFailed')  });
           })
@@ -188,12 +206,14 @@ class CommunityController {
             .then((recordCounts) => {
               const {totalPageNum, noOfRecords} = recordCounts
               logger.info(`Community list fetched successfully for company ${request.body.companyId}`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('communityListFetchSuccess'), communityList, totalPageNum, noOfRecords  } ))
               return response.status(201)
                 .send({ success: true, message: request.t('communityListFetchSuccess'), communityList, totalPageNum, noOfRecords  });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityListFetchFailed') } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communityListFetchFailed') });
             })
@@ -201,6 +221,7 @@ class CommunityController {
           .catch((err) => {
             logger.warn(`Failed to fetch the community list for company ${request.body.companyId}`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false, message: request.t('communityListFetchFailed') } ))
             return response.status(201)
                 .send({ success: false, message: request.t('communityListFetchFailed') });
           })
@@ -210,6 +231,7 @@ class CommunityController {
     static deactivateCommunity(request, response) {
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Deactivating community ID ${request.body.communityId}`)
       community.deactivateCommunity(request.body.communityId)
       .then((res) => {
@@ -233,6 +255,7 @@ class CommunityController {
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
                   logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
+                  logger.debug(JSON.stringify( { success: true, message: request.t('communityDeactivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  } ))
                   return response.status(201)
                   .send({ success: true, message: request.t('communityDeactivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
@@ -240,6 +263,7 @@ class CommunityController {
               .catch((err) => {
                 logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
                 logger.error(err)
+                logger.debug(JSON.stringify( { success: false, message: request.t('communityDeactivateSuccessFetchFailed')  } ))
                 return response.status(201)
                   .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
               })
@@ -247,6 +271,7 @@ class CommunityController {
             .catch((err) => {
               logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityDeactivateSuccessFetchFailed')  } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
             })
@@ -263,6 +288,7 @@ class CommunityController {
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
                   logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
+                  logger.debug(JSON.stringify( { success: true, message: request.t('communityDeactivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  } ))
                   return response.status(201)
                   .send({ success: true, message: request.t('communityDeactivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
@@ -270,6 +296,7 @@ class CommunityController {
               .catch((err) => {
                 logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
                 logger.error(err)
+                logger.debug(JSON.stringify( { success: false, message: request.t('communityDeactivateSuccessFetchFailed')  } ))
                 return response.status(201)
                     .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
               })
@@ -277,12 +304,14 @@ class CommunityController {
             .catch((err) => {
               logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityDeactivateSuccessFetchFailed')  } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communityDeactivateSuccessFetchFailed')  });
             })
           }
         } else {
           logger.warn(`Failed to deactivate community ID ${request.body.communityId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('communityDeactivateFailed')  } ))
           return response.status(201)
                 .send({ success: false, message: request.t('communityDeactivateFailed')  });
         }
@@ -290,6 +319,7 @@ class CommunityController {
       .catch((err) => {
         logger.warn(`Failed to deactivate community ID ${request.body.communityId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('communityDeactivateFailed')  } ))
         return response.status(201)
                 .send({ success: false, message: request.t('communityDeactivateFailed')  });
       })
@@ -298,6 +328,7 @@ class CommunityController {
     static activateCommunity(request, response) {
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Activating community ID ${request.body.communityId}`)
       community.activateCommunity(request.body.communityId)
       .then((res) => {
@@ -321,6 +352,7 @@ class CommunityController {
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
                   logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
+                  logger.debug(JSON.stringify( { success: true, message: request.t('communityActivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  } ))
                   return response.status(201)
                   .send({ success: true, message: request.t('communityActivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
@@ -328,6 +360,7 @@ class CommunityController {
               .catch((err) => {
                 logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
                 logger.error(err)
+                logger.debug(JSON.stringify( { success: false, message: request.t('communityActivateSuccessFetchFailed')  } ))
                 return response.status(201)
                   .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
               })
@@ -335,6 +368,7 @@ class CommunityController {
             .catch((err) => {
               logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityActivateSuccessFetchFailed')  } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
             })
@@ -351,6 +385,7 @@ class CommunityController {
                 community.getActiveCommunityList(request.body.companyId)
                 .then((activeCommunities) => {
                   logger.info(`Updated community list fetched successfully for company ${request.body.companyId}`)
+                  logger.debug(JSON.stringify( { success: true, message: request.t('communityActivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  } ))
                   return response.status(201)
                   .send({ success: true, message: request.t('communityActivateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                 })
@@ -358,6 +393,7 @@ class CommunityController {
               .catch((err) => {
                 logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
                 logger.error(err)
+                logger.debug(JSON.stringify( { success: false, message: request.t('communityActivateSuccessFetchFailed')  } ))
                 return response.status(201)
                     .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
               })
@@ -365,12 +401,14 @@ class CommunityController {
             .catch((err) => {
               logger.warn(`Failed to fetch updated community list for community ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityActivateSuccessFetchFailed')  } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communityActivateSuccessFetchFailed')  });
             })
           }
         } else {
           logger.warn(`Failed to activate community ID ${request.body.communityId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('communityActivateFailed')  } ))
           return response.status(201)
                 .send({ success: false, message: request.t('communityActivateFailed')  });
         }
@@ -378,6 +416,7 @@ class CommunityController {
       .catch((err) => {
         logger.warn(`Failed to activate community ID ${request.body.communityId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('communityActivateFailed')  } ))
         return response.status(201)
                 .send({ success: false, message: request.t('communityActivateFailed')  });
       })
@@ -386,6 +425,7 @@ class CommunityController {
     static deleteCommunities(request, response) {
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Deleting communities for company ${request.body.companyId}`)
       community.deleteCommunities(request.body.communityIds)
       .then((res) => {
@@ -402,12 +442,14 @@ class CommunityController {
             .then((recordCounts) => {
               const {totalPageNum, noOfRecords} = recordCounts
               logger.info(`Updated communities fetched successfully for company ${request.body.companyId}`)
+              logger.debug(JSON.stringify( { success: true, message: request.t('communitiesDeleteSuccess'), communityList, totalPageNum, noOfRecords  } ))
               return response.status(201)
                 .send({ success: true, message: request.t('communitiesDeleteSuccess'), communityList, totalPageNum, noOfRecords  });
             })
             .catch((err) => {
               logger.warn(`Failed to fetch the updated communities for company ${request.body.companyId}`)
               logger.error(err)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communitiesDeleteFailed')  } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communitiesDeleteFailed')  });
             })
@@ -415,11 +457,13 @@ class CommunityController {
           .catch((err) => {
             logger.warn(`Failed to fetch the updated communities for company ${request.body.companyId}`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false, message: request.t('communitiesDeleteFailed')  } ))
             return response.status(201)
                 .send({ success: false, message: request.t('communitiesDeleteFailed')  });
           })
         } else {
           logger.warn(`Failed to delete communities for company ${request.body.companyId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('communitiesDeleteFailed')  } ))
           return response.status(201)
                 .send({ success: false, message: request.t('communitiesDeleteFailed')  });
         }
@@ -427,6 +471,7 @@ class CommunityController {
       .catch((err) => {
         logger.warn(`Failed to delete communities for company ${request.body.companyId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('communitiesDeleteFailed')  } ))
         return response.status(201)
                 .send({ success: false, message: request.t('communitiesDeleteFailed')  });
       })
@@ -435,15 +480,18 @@ class CommunityController {
     static getActiveCommunityList(request, response) {
       const community = new Community(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Fetching active communities list for company ${request.body.companyId}`)
       community.getActiveCommunityList(request.body.companyId)
       .then((_list) => {
         logger.info(`Active communities fetched successfully for ${request.body.companyId}`)
+        logger.debug(JSON.stringify( { success: true, communityList: _list } ))
         return response.status(201)
           .send({ success: true, communityList: _list });
       })
       .catch((err) => {
         logger.warn(`Failed to fetch active communities for ${request.body.companyId}`)
+        logger.debug(JSON.stringify( { success: false, message: request.t('activeCommunitiesFetchFailed')  } ))
         return response.status(201)
                 .send({ success: false, message: request.t('activeCommunitiesFetchFailed')  });
       })
@@ -453,6 +501,7 @@ class CommunityController {
       const community = new Community(knex)
       const documents = new Documents(knex)
 
+      logger.debug(JSON.stringify( request ))
       logger.info(`Updating community ID ${request.body.communityId}`)
       logger.info(`Renaming community directory for community ${request.body.communityId}`)
       documents.renameCommunityDirectory(request.body.communityId, request.body.communityAlias)
@@ -489,6 +538,7 @@ class CommunityController {
                     community.getActiveCommunityList(request.body.companyId)
                     .then((activeCommunities) => {
                       logger.info(`Updated communities fetched for company ${request.body.companyId}`)
+                      logger.debug(JSON.stringify( { success: true, message: request.t('communityUpdateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  } ))
                       return response.status(201)
                       .send({ success: true, message: request.t('communityUpdateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                     })
@@ -496,6 +546,7 @@ class CommunityController {
                   .catch((err) => {
                     logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
                     logger.error(err)
+                    logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateSuccessFetchFailed')  } ))
                     return response.status(201)
                       .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                   })
@@ -503,6 +554,7 @@ class CommunityController {
                 .catch((err) => {
                   logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
                   logger.error(err)
+                  logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateSuccessFetchFailed')  } ))
                   return response.status(201)
                       .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                 })
@@ -519,6 +571,7 @@ class CommunityController {
                     community.getActiveCommunityList(request.body.companyId)
                     .then((activeCommunities) => {
                       logger.info(`Updated communities fetched for company ${request.body.companyId}`)
+                      logger.debug(JSON.stringify( { success: true, message: request.t('communityUpdateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  } ))
                       return response.status(201)
                       .send({ success: true, message: request.t('communityUpdateSuccess'), communityList, totalPageNum, noOfRecords, activeCommunities  });
                     })
@@ -526,6 +579,7 @@ class CommunityController {
                   .catch((err) => {
                     logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
                     logger.error(err)
+                    logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateSuccessFetchFailed')  } ))
                     return response.status(201)
                         .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                   })
@@ -533,12 +587,14 @@ class CommunityController {
                 .catch((err) => {
                   logger.warn(`Failed to fetch updated communities for company ${request.body.companyId}`)
                   logger.error(err)
+                  logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateSuccessFetchFailed')  } ))
                   return response.status(201)
                       .send({ success: false, message: request.t('communityUpdateSuccessFetchFailed')  });
                 })
               }
             } else {
               logger.warn(`Community update failed for Id ${request.body.communityId}`)
+              logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateFailed1')  } ))
               return response.status(201)
                   .send({ success: false, message: request.t('communityUpdateFailed1')  });
             }
@@ -546,11 +602,13 @@ class CommunityController {
           .catch((err) => {
             logger.warn(`Community update failed for Id ${request.body.communityId}`)
             logger.error(err)
+            logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateFailed1')  } ))
             return response.status(201)
                 .send({ success: false, message: request.t('communityUpdateFailed1')  });
           })
         } else {
           logger.warn(`Community update failed for Id ${request.body.communityId}`)
+          logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateFailed1')  } ))
           return response.status(201)
                   .send({ success: false, message: request.t('communityUpdateFailed1')  });
         }
@@ -558,6 +616,7 @@ class CommunityController {
       .catch((err) => {
         logger.warn(`Community update failed for Id ${request.body.communityId}`)
         logger.error(err)
+        logger.debug(JSON.stringify( { success: false, message: request.t('communityUpdateFailed2')  } ))
         return response.status(201)
                   .send({ success: false, message: request.t('communityUpdateFailed2')  });
       })
