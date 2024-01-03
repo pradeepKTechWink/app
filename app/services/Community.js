@@ -2,6 +2,7 @@ const { create } = require("express-handlebars");
 const user = require("../routes/user")
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
+const { v5: uuidv5   } = require('uuid');
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -24,17 +25,13 @@ class Community {
     createCommunity(
         communityName,
         communityAlias,
-        streetName,
-        city,
-        state,
-        zipcode,
         creator,
         companyId
     ) {
         return new Promise((resolve, reject) => {
 
             const dateTime = new Date()
-
+            const uuid = this.generateUUID(communityAlias, companyId)
             this.dbConnection('communities')
             .insert({
                 companyId : companyId,
@@ -42,20 +39,25 @@ class Community {
                 community_name : communityName,
                 community_alias : communityAlias,
                 active: 1,
-                street : streetName,
-                city : city,
-                state : state,
-                zipcode : zipcode,
+                uuid,
                 created : dateTime,
                 updated : dateTime
             })
             .then((communityId) => {
-                resolve(communityId)
+                resolve({
+                    communityId,
+                    uuid
+                })
             })
             .catch((err) => {
                 reject(err)
             })
         })
+    }
+
+    generateUUID(alias, companyId) {
+        const uniqueId = uuidv5(`${alias}-${companyId}-${new Date()}`, process.env.UUID_NAMESPACE)
+        return uniqueId
     }
 
     updateCommunity(
@@ -75,7 +77,7 @@ class Community {
             .update(
                 {
                     community_name : communityName,
-                    // community_alias : communityAlias,
+                    community_alias: communityAlias,
                     street : streetName,
                     city : city,
                     state : state,
@@ -349,6 +351,26 @@ class Community {
         })
     }
 
+    isAliasAlreadyExistsUnderCompany(alias, companyId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('communities')
+            .select('*')
+            .where({ community_alias: alias })
+            .andWhere({ companyId })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve(1)
+                } else {
+                    resolve(0)
+                }
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
     isReservedAliasByCommunity(alias, communityId) {
         return new Promise((resolve, reject) => {
             this.dbConnection('communities')
@@ -375,6 +397,51 @@ class Community {
             .where({ id: communityId })
             .then((res) => {
                 resolve(res[0]["community_alias"])
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    getCommunityUUID(communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('communities')
+            .select('uuid')
+            .where({ id: communityId })
+            .then((res) => {
+                resolve(res[0]["uuid"])
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    getCommunity(communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('communities')
+            .select('*')
+            .where({ id: communityId })
+            .then((res) => {
+                resolve(res)
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    getCompanyIdForCommunity(communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('communities')
+            .select('companyId')
+            .where({ id: communityId })
+            .then((res) => {
+                resolve(res[0]["companyId"])
             })
             .catch((err) => {
                 console.log(err)

@@ -26,12 +26,13 @@ const Community = require('./Community');
 const Chat = require("./Chat")
 const { embeddings } = require('../init/OpenAIEmbeddings')
 const { initVectoreStore } = require('../init/VectorStore')
-const SuperAdmin = require('./SuperAdmin')
 const CustomQuerying = require('./CustomQuerying')
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
 const dotenv = require('dotenv');
 dotenv.config();
+
+const { getQueryType, getNonResponseIdentifiers, getAdminSetting } = require('../init/redisUtils')
 
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
@@ -305,6 +306,86 @@ class Documents {
         })
     }
 
+    checkIfFolderExists(folderId, parentId, communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select("*")
+            .where({ id: folderId })
+            .andWhere({ parentId })
+            .andWhere({ communityId })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
+                }
+            })
+            .catch((err) => {
+                reject(err)
+            })
+        })
+    }
+
+    checkIfFolderExistsM2(parentId, communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select("*")
+            .where({ id: parentId })
+            .andWhere({ communityId })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
+                }
+            })
+            .catch((err) => {
+                reject(err)
+            })
+        })
+    }
+
+    checkIfFileIsValid(fileId, parentId, communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select("*")
+            .where({ id: fileId })
+            .andWhere({ communityId })
+            .andWhere({ parentId })
+            .andWhere({ isFile: '1' })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
+                }
+            })
+            .catch((err) => {
+                reject(err)
+            })
+        })
+    }
+
+    checkIfFileIsValidM2(fileId, communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("documents")
+            .select("*")
+            .where({ id: fileId })
+            .andWhere({ communityId })
+            .andWhere({ isFile: '1' })
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
+                }
+            })
+            .catch((err) => {
+                reject(err)
+            })
+        })
+    }
+
     isFile(fileName) {
         return fs.lstatSync(fileName).isFile();
     }
@@ -368,17 +449,16 @@ class Documents {
     deleteFiles(filesList, communityId) {
         return new Promise((resolve, reject) => {
             const community = new Community(this.dbConnection);
-            community.getCommunityAlias(communityId)
-            .then(async (alias) => {
-                console.log('alias :', alias)
+            community.getCommunityUUID(communityId)
+            .then(async (uuid) => {
                 if(filesList.length > 0) {
-                    const folderPath = path.resolve(`${process.env.DOCUMENT_PATH}/${alias}`)
+                    const folderPath = path.resolve(`${process.env.DOCUMENT_PATH}/${uuid}`)
                     for (const file of filesList) {
                         const ext = file.name.split('.').pop()
                         const fileName = file.id + '.' + ext
                         if(fs.existsSync(path.join(folderPath, fileName))) {
                             await fs2.unlink(path.join(folderPath, fileName));
-                            await this.deleteEmbeddingsByMetadata(file.id, alias)
+                            await this.deleteEmbeddingsByMetadata(file.id, uuid)
                         }
                     }
                     resolve(1)
@@ -486,16 +566,16 @@ class Documents {
     deleteFile(fileId, communityId) {
         return new Promise(async (resolve, reject) => {
             const community = new Community(this.dbConnection)
-            community.getCommunityAlias(communityId)
-            .then(async (alias) => {
+            community.getCommunityUUID(communityId)
+            .then(async (uuid) => {
                 this.getFileData(fileId)
                 .then(async (file) => {
-                    const folderPath = path.resolve(`${process.env.DOCUMENT_PATH}/${alias}`)
+                    const folderPath = path.resolve(`${process.env.DOCUMENT_PATH}/${uuid}`)
                     const ext = file.name.split('.').pop()
                     const fileName = file.id + '.' + ext
                     if(fs.existsSync(path.join(folderPath, fileName))) {
                         await fs2.unlink(path.join(folderPath, fileName));
-                        await this.deleteEmbeddingsByMetadata(file.id, alias)
+                        await this.deleteEmbeddingsByMetadata(file.id, uuid)
                     }
                     await this.deleteFolderDataFromDatabase(fileId)
                     resolve(1)
@@ -515,11 +595,11 @@ class Documents {
     getDocumentPath(fileId, communityId) {
         return new Promise((resolve, reject) => {
             const community = new Community(this.dbConnection)
-            community.getCommunityAlias(communityId)
-            .then((alias) => {
+            community.getCommunityUUID(communityId)
+            .then((uuid) => {
                 this.getFileData(fileId)
                 .then((file) => {
-                    const folderPath = path.resolve(`${process.env.DOCUMENT_PATH}/${alias}`)
+                    const folderPath = path.resolve(`${process.env.DOCUMENT_PATH}/${uuid}`)
                     const ext = file.name.split('.').pop()
                     const fileName = file.id + '.' + ext
                     if(fs.existsSync(path.join(folderPath, fileName))) {
@@ -545,7 +625,7 @@ class Documents {
             this.dbConnection("documents")
             .select("*")
             .where({ communityId })
-            .whereLike('name', `%${searchString}%`)
+            .whereILike('name', `%${searchString}%`)
             .then((searchResult) => {
                 resolve(searchResult)
             })
@@ -574,8 +654,8 @@ class Documents {
                 const docBasePath = path.resolve(`${process.env.DOCUMENT_PATH}/`)
                 let size = 0
                 for (const _community of communityList) {
-                    const communityAlias = await community.getCommunityAlias(_community.id)
-                    const folderPath = path.join(docBasePath, communityAlias)
+                    const uuid = await community.getCommunityUUID(_community.id)
+                    const folderPath = path.join(docBasePath, uuid)
                     if(fs.existsSync(folderPath)) {
                         const files = await fs2.readdir(folderPath)
                         for (const file of files) {
@@ -771,10 +851,10 @@ class Documents {
         })
     }
 
-    saveHtmlStringToFile(communityAlias, fileName, htmlString) {
+    saveHtmlStringToFile(uuid, fileName, htmlString) {
         return new Promise(async (resolve, reject) => {
             try {
-                const htmlFilePath = path.join(path.resolve(process.env.DOCUMENT_PATH), communityAlias)
+                const htmlFilePath = path.join(path.resolve(process.env.DOCUMENT_PATH), uuid)
                 await fs2.writeFile(path.join(htmlFilePath, `${fileName}.html`), htmlString)
                 resolve(1)
             } catch (error) {
@@ -983,31 +1063,43 @@ class Documents {
     }
 
     async isOutOfContextAnswer (aiAnswer) {
-        const filterString = await this.buildRegExpFilterString()
+        // const superAdmin = new SuperAdmin(this.dbConnection)
+        // const filterString = await superAdmin.getDataFromRedis(process.env.REDIS_IDENTIFIER_REGEX_STRING_KEY)
+        let filterString = null
+        if(process.env.CACHE_MODE == "enabled") {
+            filterString = await getNonResponseIdentifiers()
+        } else {
+            filterString = await this.getNonResponseIdentifiers()
+        }
         const regExp = new RegExp(`(?<text>${filterString})`, 'i')
         const found = aiAnswer.match(regExp)
         if(found && found.length > 0) return true
         return false
     }
 
-    queryIndex(communityAlias, parentId, chatId, question) {
+    queryIndex(uuid, parentId, chatId, question) {
         return new Promise(async (resolve, reject) => {
             const chat = new Chat(this.dbConnection)
-            const superAdmin = new SuperAdmin(this.dbConnection)
             const customQuerying = new CustomQuerying(this.dbConnection)
 
             try {
-                const setting = await superAdmin.getSettings('queryType')
-                const queryType = setting[0]['meta_value']
+                // const superAdmin = new SuperAdmin(this.dbConnection)
+                // const settings = await superAdmin.getDataFromRedis(process.env.REDIS_SUPER_ADMIN_SETTINGS_KEY)
+                // const queryType = settings['queryType']
+                const queryType = await getQueryType()
                 let res = null
                 if(queryType == 'langchain') {
                     console.log("Langchain Query")
                     logger.info(`Querying using langchain query solution`)
+                    const CHAT_MODEL = await getAdminSetting("CHAT_MODEL")
+                    console.log(CHAT_MODEL)
                     const model = new ChatOpenAI({
-                        modelName: process.env.CHAT_MODEL
+                        modelName: CHAT_MODEL
                     });
-                    const vectorStore = await initVectoreStore(communityAlias)
-                    const retriever = vectorStore.asRetriever(10)
+                    const vectorStore = await initVectoreStore(uuid)
+                    const NO_OF_CONTEXT_TO_RETRIVE = await getAdminSetting("NO_OF_CONTEXT_TO_RETRIVE")
+                    console.log(NO_OF_CONTEXT_TO_RETRIVE)
+                    const retriever = vectorStore.asRetriever(NO_OF_CONTEXT_TO_RETRIVE)
     
                     const SYSTEM_TEMPLATE = `Use the following pieces of context to answer the users question.
                     If you don't know the answer from the given context, just apologise and say that you don't know, don't try to make up an answer from outside the context.
@@ -1058,7 +1150,7 @@ class Documents {
                 } else {
                     console.log("Custom Query")
                     logger.info(`Querying using custom query solution`)
-                    res = await customQuerying.queryIndexByCustomQuerying(question, communityAlias, chatId)
+                    res = await customQuerying.queryIndexByCustomQuerying(question, uuid, chatId)
                 }
 
                 const delimitedText = this.addDelimiterForAIResponse(res.result)
@@ -1085,7 +1177,9 @@ class Documents {
                         reject(err)
                     })
                 } else {
-                    chat.addMessagesToTheChatHistory(chatId, process.env.OPENAI_FAILURE_ANSWER, 'bot', parentId, null)
+                    const OPENAI_FAILURE_ANSWER = await getAdminSetting("OPENAI_FAILURE_ANSWER")
+                    console.log(OPENAI_FAILURE_ANSWER)
+                    chat.addMessagesToTheChatHistory(chatId, OPENAI_FAILURE_ANSWER, 'bot', parentId, null)
                     .then((messageId) => {
                         resolve(messageId)
                     })
@@ -1097,7 +1191,9 @@ class Documents {
                 
             } catch (error) {
                 console.log(error)
-                chat.addMessagesToTheChatHistory(chatId, process.env.OPENAI_FAILURE_ANSWER, 'bot', parentId, null)
+                const OPENAI_FAILURE_ANSWER = await getAdminSetting("OPENAI_FAILURE_ANSWER")
+                console.log(OPENAI_FAILURE_ANSWER)
+                chat.addMessagesToTheChatHistory(chatId, OPENAI_FAILURE_ANSWER, 'bot', parentId, null)
                 .then((messageId) => {
                     resolve(messageId)
                 })

@@ -1,4 +1,4 @@
-const SuperAdmin = require('./SuperAdmin')
+const { getNoOfPreviousConversationToPass } = require("../init/redisUtils")
 
 class Chat {
     constructor(dbConnection) {
@@ -94,16 +94,23 @@ class Chat {
     }
 
     getNoOfPastMessageToBeAdded() {
-        return new Promise((resolve, reject) => {
-            const superAdmin = new SuperAdmin(this.dbConnection)
-            superAdmin.getSettings('conversationNumberToPass')
-            .then((setting) => {
-                resolve(setting[0]['meta_value'])
-            })
-            .catch((err) => {
-                console.log(err)
-                reject(err)
-            })
+        return new Promise(async (resolve, reject) => {
+            // const superAdmin = new SuperAdmin(this.dbConnection)
+            // superAdmin.getDataFromRedis(process.env.REDIS_SUPER_ADMIN_SETTINGS_KEY)
+            // .then((setting) => {
+            //     resolve(setting['conversationNumberToPass'])
+            // })
+            // .catch((err) => {
+            //     console.log(err)
+            //     reject(err)
+            // })
+            try {
+                const numb = await getNoOfPreviousConversationToPass()
+                console.log(numb)
+                resolve(numb)
+            } catch (error) {
+                reject(error)
+            }
         })
     }
 
@@ -120,10 +127,11 @@ class Chat {
                     const userQueries = await this.extractUserQueries(filteredConversation)
                     const aiAnswers = await this.extractAIAnswers(filteredConversation)
                     const chatHistories = await this.addAIReplyToUserQueries(userQueries, aiAnswers)
+                    console.log('History Length', chatHistories.length)
                     resolve(chatHistories)
                 })
                 .catch((err) => {
-
+                    reject(err)
                 })
             })
             .catch((err) => {
@@ -210,6 +218,45 @@ class Chat {
             .where({ id: chatId })
             .then((historyData) => {
                 resolve(historyData[0])
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    doesChatIdExists(chatId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("chat_histories")
+            .select("*")
+            .where({ id: chatId })
+            .then((historyData) => {
+                if(historyData.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
+                }
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    doesChatIdExistsInCommunity(chatId, communityId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("chat_histories")
+            .select("*")
+            .where({ id: chatId })
+            .andWhere({ communityId })
+            .then((historyData) => {
+                if(historyData.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
+                }
             })
             .catch((err) => {
                 console.log(err)

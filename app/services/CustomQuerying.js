@@ -6,6 +6,7 @@ const Chat = require('./Chat')
 const dotenv = require('dotenv');
 const winston = require('winston');
 const { combine, timestamp, json } = winston.format;
+const { getAdminSetting } = require('../init/redisUtils')
 dotenv.config();
 
 const logger = winston.createLogger({
@@ -37,7 +38,9 @@ class CustomQuerying {
             new OpenAIEmbeddings(),
             { pineconeIndex, namespace },
         );
-        const retriever = vectorStore.asRetriever(10)
+        const NO_OF_CONTEXT_TO_RETRIVE = await getAdminSetting("NO_OF_CONTEXT_TO_RETRIVE")
+        console.log(NO_OF_CONTEXT_TO_RETRIVE)
+        const retriever = vectorStore.asRetriever(NO_OF_CONTEXT_TO_RETRIVE)
     
         const relevantDocs = retriever.getRelevantDocuments(userQuery)
         return relevantDocs
@@ -115,8 +118,11 @@ class CustomQuerying {
         logger.info(`Prompt building success`)
         logger.info(prompt)
 
+        const CHAT_MODEL = await getAdminSetting("CHAT_MODEL")
+        console.log(CHAT_MODEL)
+
         const completion = await openai.chat.completions.create({
-            model: process.env.CHAT_MODEL,
+            model: CHAT_MODEL,
             messages: [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": query},

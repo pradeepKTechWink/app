@@ -22,6 +22,157 @@ class Users {
         this.dbConnection = dbConnection
     }
 
+    createNewUserGoogle(
+        firstname,
+        lastname,
+        email,
+        profilePic,
+        accountType
+    ) {
+        return new Promise((resolve, reject) => {
+
+            const token = this.getRandomIntInclusive()
+            const token_issued = Date.now()
+            const dateTime = new Date()
+
+            this.dbConnection('users').insert(
+                {
+                    firstname,
+                    lastname,
+                    email,
+                    mobileNumber: '(000)-000-0000',
+                    password: '',
+                    accountStatus: 1,
+                    token,
+                    token_issued,
+                    created: dateTime,
+                    updated: dateTime
+                }
+            ).then(async (userId) => {
+                try {
+                    await this._addUserMeta(userId[0], 'otp', '')
+                    await this._addUserMeta(userId[0], 'otp_issued', '')
+                    await this._addUserMeta(userId[0], 'incorrect_attempt_count', 0)
+                    await this._addUserMeta(userId[0], 'attempt_timestamp', '')
+                    await this._addUserMeta(userId[0], 'accountLockStatus', 0)
+                    await this._addUserMeta(userId[0], 'profilePic', profilePic)
+                    await this._addUserMeta(userId[0], 'accountBlocked', '0')
+
+                    const superAdmin = new SuperAdmin(this.dbConnection)
+                    let default2FA = '0'
+                    if(process.env.CACHE_MODE == 'enabled') {
+                        const settings = await superAdmin.getDataFromRedis(process.env.REDIS_SUPER_ADMIN_SETTINGS_KEY)
+                        default2FA = settings['default2FA']
+                    } else {
+                        const default2FASetting = await superAdmin.getSettings('default2FA')
+                        default2FA = default2FASetting[0]['meta_value']
+                    }
+                    
+                    console.log('default2FA', default2FA)
+                    await this._addUserMeta(userId[0], '2FA', default2FA)
+                    await this._addUserMeta(userId[0], 'accountType', accountType)
+
+                    resolve({
+                        userId: userId[0],
+                        token,
+                        default2FA: default2FA
+                    })
+                } catch (error) {
+                    console.log(error)
+                    logger.error(error)
+                    reject(error)
+                }
+            })
+        })
+    }
+
+    validateGoogleLoginCredential(email) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('users').where({
+                email: email
+            }).select('id')
+                .then((res) => {
+                    if (res.length > 0) {
+                        this.isAccountLockedForIncorrectOtpAccount(res[0].id)
+                            .then((stat) => {
+                                if (stat == 0) {
+                                    resolve(
+                                        {
+                                            stat: 'valid',
+                                            userId: res[0].id,
+                                        }
+                                    )
+                                } else {
+                                    resolve(
+                                        {
+                                            stat: 'locked'
+                                        }
+                                    )
+                                }
+                            })
+                            .catch((err) => {
+                                console.log(err)
+                                reject(err)
+                            })
+                    } else {
+                        resolve({ stat: 'invalid' })
+                    }
+                })
+                .catch((err) => {
+                    logger.error(err)
+                    reject(err)
+                })
+        })
+    }
+
+    validateGoogleCredentialAndOtp(email, otp) {
+        return new Promise((resolve, reject) => {
+            this.validateGoogleLoginCredential(email).then((res) => {
+                const currentTimestamp = Date.now()
+                if (res.stat == 'valid') {
+                    this.isAccountLockedForIncorrectOtpAccount(res.userId)
+                        .then((stat) => {
+                            if (stat == 0) {
+                                this.getUserMetaValue(res.userId, 'otp').then((otpInRecord) => {
+                                    if (otpInRecord == otp) {
+                                        this.getUserMetaValue(res.userId, 'otp_issued').then((otpIssuedTime) => {
+                                            const tDiff = currentTimestamp - otpIssuedTime
+                                            if (tDiff <= 600000) {
+                                                resolve('valid')
+                                            } else {
+                                                resolve('expired')
+                                            }
+                                        })
+                                    } else {
+                                        this.updateIncorrectOTPAttemptRecord(res.userId)
+                                        resolve('Invalid OTP')
+                                    }
+                                })
+                            } else {
+                                resolve('locked')
+                            }
+                        })
+                } else if (res.stat == 'locked') {
+                    resolve('locked')
+                } else {
+                    resolve('Invalid Credential')
+                }
+            })
+        })
+    }
+
+    getAccountType(userId) {
+        return new Promise((resolve, reject) => {
+            this.getUserMetaValue(userId, 'accountType')
+            .then((accountType) => {
+                resolve(accountType)
+            })
+            .catch((err) => {
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
 
     createNewUser(
         firstname,
@@ -29,6 +180,8 @@ class Users {
         email,
         mobileNumber,
         password,
+        accountType,
+        paidStatus
     ) {
         return new Promise((resolve, reject) => {
 
@@ -59,24 +212,33 @@ class Users {
                         await this._addUserMeta(userId[0], 'attempt_timestamp', '')
                         await this._addUserMeta(userId[0], 'accountLockStatus', 0)
                         await this._addUserMeta(userId[0], 'profilePic', 'default.png')
-                        await this._addUserMeta(userId[0], 'accountBlocked', '0')
+                        await this._addUserMeta(userId[0], 'accountBlocked', paidStatus == '1' ? '0' : '1')
 
                         const superAdmin = new SuperAdmin(this.dbConnection)
-                        const default2FASetting = await superAdmin.getSettings('default2FA')
-                        console.log('default2FA', default2FASetting[0]['meta_value'])
-                        await this._addUserMeta(userId[0], '2FA', default2FASetting[0]['meta_value'])
+                        let default2FA = '0'
+                        if(process.env.CACHE_MODE == 'enabled') {
+                            const settings = await superAdmin.getDataFromRedis(process.env.REDIS_SUPER_ADMIN_SETTINGS_KEY)
+                            default2FA = settings['default2FA']
+                        } else {
+                            const default2FASetting = await superAdmin.getSettings('default2FA')
+                            default2FA = default2FASetting[0]['meta_value']
+                        }
+                        await this._addUserMeta(userId[0], '2FA', default2FA)
+                        await this._addUserMeta(userId[0], 'accountType', accountType)
     
                         resolve({
                             userId: userId[0],
                             token,
-                            default2FA: default2FASetting[0]['meta_value']
+                            default2FA: default2FA
                         })
                     } catch (error) {
+                        console.log(error)
                         logger.error(error)
                         reject(error)
                     }
                 })
                 .catch((err) => {
+                    console.log(error)
                     logger.error(err)
                     reject(err)
                 })
@@ -229,16 +391,22 @@ class Users {
                     await this.addCompanyMeta(_companyId[0], 'companyLogo', 'default.png')
 
                     const superAdmin = new SuperAdmin(this.dbConnection)
-                    const default2FASetting = await superAdmin.getSettings('default2FA')
-                    console.log('default2FA', default2FASetting[0]['meta_value'])
-                    await this.addCompanyMeta(_companyId[0], '2FA', default2FASetting[0]['meta_value'])
-                    await this.addCompanyMeta(_companyId[0], 'isMailAndBillAddressSame', isMailAndBillAddressSame == 'true' ? '1' : '0')
+                    let default2FA = '0'
+                    if(process.env.CACHE_MODE == 'enabled') {
+                        const settings = await superAdmin.getDataFromRedis(process.env.REDIS_SUPER_ADMIN_SETTINGS_KEY)
+                        default2FA = settings['default2FA']
+                    } else {
+                        const default2FASetting = await superAdmin.getSettings('default2FA')
+                        default2FA = default2FASetting[0]['meta_value']
+                    }
+                    await this.addCompanyMeta(_companyId[0], '2FA', default2FA)
+                    await this.addCompanyMeta(_companyId[0], 'isMailAndBillAddressSame', isMailAndBillAddressSame == true ? '1' : '0')
 
                     await this.addRoleAndCompanyToUser(userId, _companyId, 1)
     
                     resolve({
                         companyId: _companyId,
-                        companyDefault2FA: default2FASetting[0]['meta_value']
+                        companyDefault2FA: default2FA
                     })
                 } catch (error) {
                     logger.error(error)
@@ -247,6 +415,66 @@ class Users {
             })
             .catch((err) => {
                 logger.error(err)
+                reject(err)
+            })
+        })
+    }
+
+    addSubscriptionData(
+        userId,
+        paymentId,
+        subscriptionType,
+        subscriptionAmount,
+        paymentStatus
+    ) {
+        return new Promise((resolve, reject) => {
+            const dateTime = new Date()
+            this.dbConnection('subscriptions').insert(
+                {
+                    userId: userId,
+                    payment_id: paymentId,
+                    subscription_type: subscriptionType,
+                    subscription_amount: subscriptionAmount,
+                    payment_status: paymentStatus,
+                    created: dateTime
+                }
+            )
+            .then((res) => {
+                resolve(res)
+            })
+            .catch((err) => {
+                reject(err)
+            })
+        })
+    }
+
+    checkPaymentStatus(email) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection("users")
+            .select('id')
+            .where({ email })
+            .then((res) => {
+                if(res.length > 0) {
+                    this.dbConnection('subscriptions')
+                    .select('payment_status')
+                    .where({ userId: res[0]['id'] })
+                    .then((res) => {
+                        if(res.length > 0) {
+                            if(res[0]['payment_status'] == '1') {
+                                resolve('success')
+                            } else {
+                                resolve('failed')
+                            }
+                        } else {
+                            resolve('pending')
+                        }
+                    })
+                } else {
+                    resolve('pending')
+                }   
+            })
+            .catch((err) => {
+                console.log(err)
                 reject(err)
             })
         })
@@ -539,7 +767,11 @@ class Users {
                 [userId, metaKey]
             )
             .then((res) => {
-                resolve(res[0][0].metaValue)
+                if(res[0].length > 0) {
+                    resolve(res[0][0].metaValue)
+                } else {
+                    resolve('')
+                }
             })
             .catch((err) => {
                 logger.error(err)
@@ -688,6 +920,22 @@ class Users {
         })
     }
 
+    getCompanyIdForUser(userId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection.raw(
+                'Select company from user_company_role_relationship where userId = ?',
+                [userId]
+            )
+            .then((res) => {
+                resolve(res[0][0].company)
+            })
+            .catch((err) => {
+                logger.error(err)
+                reject(err)
+            })
+        })
+    }
+
     getCompanyRoleForUser(userId, companyId) {
         return new Promise((resolve, reject) => {
             this.dbConnection.raw(
@@ -728,6 +976,42 @@ class Users {
                     }
                     resolve(user)
                 })
+            })
+            .catch((err) => {
+                logger.error(err)
+                reject(err)
+            })
+        })
+    }
+
+    isUserExist(userId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('users').where({
+                id: userId
+            }).select('*')
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                }
+                resolve('not-exists')
+            })
+            .catch((err) => {
+                logger.error(err)
+                reject(err)
+            })
+        })
+    }
+
+    isCompanyExist(companyId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('companies').where({
+                id: companyId
+            }).select('*')
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                }
+                resolve('not-exists')
             })
             .catch((err) => {
                 logger.error(err)
@@ -842,7 +1126,8 @@ class Users {
                     accountLockStatus: temp['accountLockStatus'] == 1 ? true : false,
                     avatarName: `${process.env.USER_IMAGE_URL}/${temp['profilePic']}`,
                     twoFactorAuth: temp['2FA'] == 1 ? true : false,
-                    accountBlocked: temp['accountBlocked'] == 1 ? true : false
+                    accountBlocked: temp['accountBlocked'] == 1 ? true : false,
+                    accountType: temp['accountType']
                 }
                 resolve(data)
             })
@@ -877,7 +1162,7 @@ class Users {
                         state: temp['billingAddState'],
                         postCode: temp['billingAddZip']
                     },
-                    companyLogo: `${process.env.COMPANY_IMAGE_URL}/${temp['companyLogo']}`,
+                    companyLogo: temp['companyLogo'] ? `${process.env.COMPANY_IMAGE_URL}/${temp['companyLogo']}` : null,
                     companytwoFactorAuth: temp['2FA'] == 1 ? true : false,
                     isMailAndBillAddressSame: temp['isMailAndBillAddressSame'] == 1 ? true : false
                 }
@@ -1156,7 +1441,6 @@ class Users {
             .where({ id: userId })
             .select('accountStatus')
             .then((res) => {
-                console.log(res)
                 if(res[0].accountStatus == 1) {
                     resolve('verified')
                 } else {
@@ -1496,6 +1780,26 @@ class Users {
                     resolve(res[0])
                 } else {
                     resolve(false)
+                }
+            })
+            .catch((err) => {
+                logger.error(err)
+                console.log(err)
+                reject(err)
+            })
+        })
+    }
+
+    isInvitationExist(invitationId) {
+        return new Promise((resolve, reject) => {
+            this.dbConnection('invitations')
+            .where({id : invitationId})
+            .select('*')
+            .then((res) => {
+                if(res.length > 0) {
+                    resolve('exists')
+                } else {
+                    resolve('not-exists')
                 }
             })
             .catch((err) => {

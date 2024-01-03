@@ -4,22 +4,22 @@ const ChatController = require('../controllers/chat')
 const auth = require('../middleware/authenticate')
 
 router.route('/chat/create')
-    .post(auth.verifyToken, auth.isCompanyUser, ChatController.createNewChat)
+    .post(auth.verifyToken, auth.communityExists, auth.isMemberOfCommunity, ChatController.createNewChat)
 
 router.route('/chat/get-histories')
-    .post(auth.verifyToken, auth.isCompanyUser, ChatController.getChatHistoriesForUserByCommunity)
+    .post(auth.verifyToken, auth.userExists, auth.isSenderOwner, auth.communityExists, auth.isMemberOfCommunity, ChatController.getChatHistoriesForUserByCommunity)
 
 router.route('/chat/rename')
-    .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.renameChatHistory)
+    .post(auth.verifyToken, auth.communityExists, auth.isMemberOfCommunity, auth.isChatIdExist, auth.isChatIdBelongsToCommunity, auth.isChatCreator, ChatController.renameChatHistory)
 
 router.route('/chat/delete')
-    .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.deleteChatHistory)
+    .post(auth.verifyToken, auth.communityExists, auth.isMemberOfCommunity, auth.isChatIdExist, auth.isChatIdBelongsToCommunity, auth.isChatCreator, ChatController.deleteChatHistory)
 
 router.route('/chat/get-messages')
-    .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.retrieveChatMessages)
+    .post(auth.verifyToken, auth.isChatIdExist, auth.isChatCreator, ChatController.retrieveChatMessages)
 
 router.route('/chat/add-message')
-    .post(auth.verifyToken, auth.isCompanyUser, auth.isChatCreator, ChatController.addMessageToConversation)
+    .post(auth.verifyToken, auth.communityExists, auth.isMemberOfCommunity, auth.isChatIdExist, auth.isChatIdBelongsToCommunity, auth.isChatCreator, ChatController.addMessageToConversation)
 
 module.exports = () => router;
 
